@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="lt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Racija</title>
+<style>
+:root{
+  --bg:#0b0f14; --panel:#121820; --line:#1f2833; --text:#e6edf3; --muted:#7d8a99;
+  --accent:#ff8a1f; --accent2:#ffb347; --ok:#2ecc71; --busy:#e74c3c; --rx:#3fa9f5;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom)}
+.hidden{display:none!important}
+
+/* prisijungimas */
+#login{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;max-width:420px;width:100%;margin:0 auto}
+#login h1{margin:0 0 8px;font-size:34px;letter-spacing:.5px}
+#login h1 span{color:var(--accent)}
+#login p{margin:0 0 10px;color:var(--muted)}
+label{font-size:13px;color:var(--muted)}
+input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
+  color:var(--text);font-size:17px;outline:none}
+input:focus{border-color:var(--accent)}
+.btn{padding:16px;border:0;border-radius:12px;background:var(--accent);color:#111;font-weight:700;font-size:17px}
+.err{color:var(--busy);font-size:14px;min-height:18px}
+
+/* pagrindinis */
+#app{flex:1;display:flex;flex-direction:column;max-width:520px;width:100%;margin:0 auto;min-height:0}
+header{display:flex;align-items:center;gap:10px;padding:14px 0}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--busy);flex:none}
+.dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+header .ch{font-weight:700;font-size:18px}
+header .me{color:var(--muted);font-size:14px}
+header .sp{flex:1}
+header button{background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:8px 10px;font-size:13px}
+
+#status{height:56px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-weight:600;transition:.15s}
+#status.rx{background:rgba(63,169,245,.15);border-color:var(--rx);color:var(--rx)}
+#status.tx{background:rgba(255,138,31,.15);border-color:var(--accent);color:var(--accent)}
+#status.busy{background:rgba(231,76,60,.15);border-color:var(--busy);color:var(--busy)}
+
+#pttWrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:240px}
+#ptt{width:min(62vw,240px);height:min(62vw,240px);border-radius:50%;border:0;
+  background:radial-gradient(circle at 35% 30%,var(--accent2),var(--accent) 60%,#c25d00);
+  color:#1a1a1a;font-size:20px;font-weight:800;letter-spacing:1px;
+  box-shadow:0 10px 40px rgba(255,138,31,.35),inset 0 -6px 0 rgba(0,0,0,.2);
+  user-select:none;-webkit-user-select:none;touch-action:none;transition:transform .08s}
+#ptt.down{transform:scale(.94);box-shadow:0 0 0 14px rgba(255,138,31,.18),0 0 60px rgba(255,138,31,.6)}
+#ptt.locked{background:#2a3340;color:var(--muted);box-shadow:none}
+#ptt small{display:block;font-size:12px;font-weight:600;opacity:.7;margin-top:6px}
+
+.sec{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:10px 0 8px}
+#users{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:6px 10px;border-radius:20px;background:var(--panel);border:1px solid var(--line);font-size:13px}
+.chip.talk{border-color:var(--rx);color:var(--rx)}
+#hist{list-style:none;margin:0;padding:0 0 16px;overflow-y:auto;max-height:32vh}
+#hist li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;
+  background:var(--panel);border:1px solid var(--line);margin-bottom:6px}
+#hist li .who{flex:1;font-weight:600}
+#hist li .t{color:var(--muted);font-size:13px}
+#hist li button{width:40px;height:40px;border-radius:50%;border:0;background:var(--line);color:var(--text);font-size:15px}
+#hist li.playing button{background:var(--rx);color:#000}
+.empty{color:var(--muted);font-size:14px;padding:6px 0}
+</style>
+</head>
+<body>
+
+<section id="login">
+  <h1>Racij<span>a</span></h1>
+  <p>Paspausk ir laikyk mygtuką, kad kalbėtum.</p>
+  <label for="name">Vardas</label>
+  <input id="name" autocomplete="name" placeholder="pvz. Saulius">
+  <label for="channel">Kanalas</label>
+  <input id="channel" placeholder="pvz. planavimas-1" value="bendras">
+  <button class="btn" id="joinBtn">Prisijungti</button>
+  <div class="err" id="err"></div>
+</section>
+
+<section id="app" class="hidden">
+  <header>
+    <div class="dot" id="dot"></div>
+    <div><div class="ch" id="chName">#</div><div class="me" id="meName"></div></div>
+    <div class="sp"></div>
+    <button id="leaveBtn">Keisti</button>
+  </header>
+
+  <div id="status">Tylu</div>
+
+  <div id="pttWrap">
+    <button id="ptt">KALBĖTI<small>laikyk nuspaudęs</small></button>
+  </div>
+
+  <div class="sec">Prisijungę (<span id="cnt">0</span>)</div>
+  <div id="users"></div>
+
+  <div class="sec">Istorija</div>
+  <ul id="hist"></ul>
+</section>
+
+<script>
+const RATE = 16000;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k){ try{ return localStorage.getItem(k) }catch{ return null } },
+  set(k,v){ try{ localStorage.setItem(k,v) }catch{} }
+};
+
+// ---------- mu-law ----------
+const MU = new Int16Array(256);
+for (let i=0;i<256;i++){ const u=~i&0xff; let t=((u&0x0f)<<3)+0x84; t<<=(u&0x70)>>4; MU[i]=(u&0x80)?(0x84-t):(t-0x84); }
+function linToMu(s){
+  let sign=(s>>8)&0x80; if(sign) s=-s; if(s>32635) s=32635; s+=0x84;
+  let exp=7; for(let mask=0x4000;(s&mask)===0&&exp>0;exp--,mask>>=1);
+  const mant=(s>>(exp+3))&0x0f;
+  return ~(sign|(exp<<4)|mant)&0xff;
+}
+
+// ---------- būsena ----------
+let ws=null, me=null, chan=null, ctx=null, stream=null, proc=null, gainOut=null;
+let talking=false, waitGrant=false, rxFrom=null, talkerName=null, playHead=0, dsPos=0;
+let reconnectTimer=null, wakeLock=null, currentAudio=null;
+
+// ---------- garsas ----------
+async function initAudio(){
+  ctx = ctx || new (window.AudioContext||window.webkitAudioContext)();
+  if (ctx.state==='suspended') await ctx.resume();
+  gainOut = gainOut || (()=>{ const g=ctx.createGain(); g.gain.value=1.4; g.connect(ctx.destination); return g })();
+  if (!stream){
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+    const src = ctx.createMediaStreamSource(stream);
+    proc = ctx.createScriptProcessor(4096,1,1);
+    const mute = ctx.createGain(); mute.gain.value=0;
+    src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+    proc.onaudioprocess = e => {
+      if (!talking || !ws || ws.readyState!==1) return;
+      const out = encode(e.inputBuffer.getChannelData(0));
+      if (out.length) ws.send(out);
+    };
+  }
+}
+
+function encode(input){
+  const ratio = ctx.sampleRate / RATE;
+  const out = [];
+  while (dsPos < input.length){
+    const a = Math.floor(dsPos), b = Math.max(a+1, Math.min(input.length, Math.floor(dsPos+ratio)));
+    let sum=0; for(let i=a;i<b;i++) sum+=input[i];
+    let v = sum/(b-a); v = Math.max(-1,Math.min(1,v));
+    out.push(linToMu(Math.round(v*32767)));
+    dsPos += ratio;
+  }
+  dsPos -= input.length;
+  return new Uint8Array(out);
+}
+
+function playChunk(bytes){
+  if (!ctx) return;
+  const buf = ctx.createBuffer(1, bytes.length, RATE);
+  const d = buf.getChannelData(0);
+  for (let i=0;i<bytes.length;i++) d[i] = MU[bytes[i]]/32768;
+  const s = ctx.createBufferSource(); s.buffer=buf; s.connect(gainOut);
+  const now = ctx.currentTime;
+  if (playHead < now + 0.03) playHead = now + 0.2; // 200 ms buferis nuo trūkinėjimo
+  s.start(playHead); playHead += buf.duration;
+}
+
+function beep(freq, at=0, dur=0.07){
+  if (!ctx) return;
+  const o=ctx.createOscillator(), g=ctx.createGain();
+  o.frequency.value=freq; o.type='sine';
+  const t = Math.max(ctx.currentTime, at);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.25,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+dur+0.02);
+}
+
+// ---------- ryšys ----------
+function connect(){
+  clearTimeout(reconnectTimer);
+  const proto = location.protocol==='https:'?'wss':'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType='arraybuffer';
+  ws.onopen = () => { $('dot').classList.add('on'); ws.send(JSON.stringify({t:'join',name:me,channel:chan})); };
+  ws.onclose = () => {
+    $('dot').classList.remove('on');
+    if (talking) stopTalk(true);
+    if (me) reconnectTimer = setTimeout(connect, 2000);
+  };
+  ws.onmessage = ev => {
+    if (ev.data instanceof ArrayBuffer){ playChunk(new Uint8Array(ev.data)); return; }
+    const m = JSON.parse(ev.data);
+    switch(m.t){
+      case 'joined': chan=m.channel; $('chName').textContent='#'+chan; renderHist(m.history); break;
+      case 'presence': talkerName=m.talker; renderUsers(m.users); updateStatus(); break;
+      case 'granted': waitGrant=false; if ($('ptt').classList.contains('down')) { talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else sendStop(); break;
+      case 'busy': waitGrant=false; vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); break;
+      case 'start': rxFrom=m.from; beep(660); vib(20); updateStatus(); break;
+      case 'stop':
+        if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
+        if (m.forced && talking){ stopTalk(true); flash('Pasiektas 60 s limitas'); }
+        if (m.item) addHist(m.item, true);
+        updateStatus(); break;
+    }
+  };
+}
+
+// ---------- PTT ----------
+const ptt = $('ptt');
+function pttDown(e){
+  e.preventDefault();
+  if (ptt.classList.contains('down')) return;
+  if (talkerName && talkerName!==me){ vib([60,40,60]); flash(`Užimta: kalba ${talkerName}`); return; }
+  if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
+  ptt.classList.add('down');
+  if (currentAudio){ currentAudio.pause(); }
+  waitGrant=true; ws.send(JSON.stringify({t:'start'}));
+}
+function pttUp(e){
+  if (e) e.preventDefault();
+  if (!ptt.classList.contains('down')) return;
+  ptt.classList.remove('down');
+  if (talking) stopTalk();
+}
+function stopTalk(silent){
+  // leidžiam paskutiniam audio buferiui nueiti
+  setTimeout(()=>{ talking=false; sendStop(); if(!silent){ beep(520); } updateStatus(); }, 120);
+  ptt.classList.remove('down');
+}
+function sendStop(){ if (ws && ws.readyState===1) ws.send(JSON.stringify({t:'stop'})); }
+
+ptt.addEventListener('pointerdown', pttDown);
+ptt.addEventListener('pointerup', pttUp);
+ptt.addEventListener('pointercancel', pttUp);
+ptt.addEventListener('pointerleave', pttUp);
+ptt.addEventListener('contextmenu', e=>e.preventDefault());
+// kompiuteryje: tarpo klavišas
+document.addEventListener('keydown', e=>{ if(e.code==='Space' && !e.repeat && me && document.activeElement.tagName!=='INPUT') pttDown(e); });
+document.addEventListener('keyup', e=>{ if(e.code==='Space' && me) pttUp(e); });
+
+// ---------- UI ----------
+let flashTimer=null, flashMsg=null;
+function flash(msg){ flashMsg=msg; updateStatus(); clearTimeout(flashTimer); flashTimer=setTimeout(()=>{flashMsg=null;updateStatus()},1800); }
+function updateStatus(){
+  const st=$('status'); st.className='';
+  const otherTalking = talkerName && talkerName!==me;
+  ptt.classList.toggle('locked', !!otherTalking);
+  if (flashMsg){ st.classList.add('busy'); st.textContent=flashMsg; }
+  else if (talking){ st.classList.add('tx'); st.textContent='● Tu kalbi…'; }
+  else if (otherTalking){ st.classList.add('rx'); st.textContent=`🔊 Kalba ${talkerName}`; }
+  else st.textContent='Tylu';
+}
+function renderUsers(list){
+  $('cnt').textContent=list.length;
+  $('users').innerHTML = list.map(u=>`<span class="chip${u===talkerName?' talk':''}">${esc(u)}${u===me?' (tu)':''}</span>`).join('');
+}
+function renderHist(items){
+  $('hist').innerHTML='';
+  if (!items.length) $('hist').innerHTML='<li class="empty" style="background:none;border:0">Dar nėra žinučių</li>';
+  items.forEach(i=>addHist(i,false));
+}
+function addHist(i, top){
+  const empty = $('hist').querySelector('.empty'); if (empty) empty.remove();
+  const li=document.createElement('li');
+  const time=new Date(i.ts).toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
+  li.innerHTML=`<span class="who">${esc(i.from)}</span><span class="t">${time} · ${i.dur}s</span><button>▶</button>`;
+  li.querySelector('button').onclick=()=>playHist(i.id, li);
+  if (top) $('hist').prepend(li); else $('hist').prepend(li);
+  while ($('hist').children.length>50) $('hist').lastChild.remove();
+}
+function playHist(id, li){
+  if (currentAudio){ currentAudio.pause(); document.querySelectorAll('#hist li.playing').forEach(x=>x.classList.remove('playing')); }
+  currentAudio = new Audio('/audio/'+id);
+  li.classList.add('playing');
+  currentAudio.onended = currentAudio.onpause = ()=>li.classList.remove('playing');
+  currentAudio.play().catch(()=>{ li.classList.remove('playing'); flash('Įrašas nebeprieinamas'); });
+}
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const vib = p => { try{ navigator.vibrate && navigator.vibrate(p) }catch{} };
+
+async function keepAwake(){
+  try{ if ('wakeLock' in navigator && document.visibilityState==='visible') wakeLock = await navigator.wakeLock.request('screen'); }catch{}
+}
+document.addEventListener('visibilitychange', ()=>{ if (me && document.visibilityState==='visible') keepAwake(); });
+
+// ---------- prisijungimas ----------
+$('name').value = store.get('racija_name')||'';
+$('channel').value = store.get('racija_channel')||'bendras';
+
+$('joinBtn').onclick = async ()=>{
+  const n=$('name').value.trim(), c=$('channel').value.trim()||'bendras';
+  if (!n){ $('err').textContent='Įvesk vardą'; return; }
+  $('err').textContent='';
+  try{ await initAudio(); }
+  catch(e){ $('err').textContent='Nepavyko gauti mikrofono. Leisk naršyklei naudoti mikrofoną (reikia HTTPS).'; return; }
+  me=n; chan=c.toLowerCase();
+  store.set('racija_name',n); store.set('racija_channel',c);
+  $('meName').textContent=me;
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  keepAwake(); connect();
+};
+
+$('leaveBtn').onclick = ()=>{
+  me=null; clearTimeout(reconnectTimer);
+  if (ws) ws.close();
+  $('app').classList.add('hidden'); $('login').classList.remove('hidden');
+};
+</script>
+</body>
+</html>
