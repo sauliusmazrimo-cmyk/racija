@@ -340,11 +340,12 @@ wss.on('connection', (ws, req) => {
         if (alarm && c && c.talker && c.talker !== ws) {
           const t = c.talker; endTalk(t, 'alarm'); send(t, { t: 'toast', msg: `🚨 ${ws.user}: ${text}` });
         }
-        const item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: text, alarm };
+        const cid = /^[0-9a-z]{6}$/.test(String(m.cid || '')) ? m.cid : undefined; // bendras id su LoRa žinute
+        const item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: text, alarm, cid };
         ch.history.push(item);
         while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
         saveDb();
-        return broadcast(ws.chan, { t: 'cmd', from: ws.user, text, alarm, voice: !!m.voice, item });
+        return broadcast(ws.chan, { t: 'cmd', from: ws.user, text, alarm, voice: !!m.voice, cid, item });
       }
       case 'stop':
         return endTalk(ws);

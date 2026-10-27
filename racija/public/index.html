@@ -156,6 +156,17 @@ input:focus{border-color:var(--accent)}
 .cmdRow button.rec{background:#7a1d16;border-color:#e74c3c}
 .cmdRow button.rec.on{background:#e74c3c;animation:flashA .6s steps(1) infinite}
 .cmdRow button.has{border-color:var(--ok)}
+.meshCard{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);margin-bottom:10px}
+.meshCard.ok{border-color:rgba(46,204,113,.5);background:rgba(46,204,113,.08)}
+.meshCard .mi{font-size:22px}
+.meshCard .mt{flex:1;min-width:0}
+.meshCard .mt b{display:block;font-size:15px}
+.meshCard .mt small{display:block;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+#meshBox #cmdBar{margin:0 0 12px}
+#meshDot{font-size:13px;margin-left:2px}
+#meshDot.off{display:none}
+#meshDot.warn{opacity:.35;filter:grayscale(1)}
+select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:17px}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -186,6 +197,7 @@ input:focus{border-color:var(--accent)}
     <button class="ghost" id="logoutBtn">Atsijungti</button>
   </div>
   <div class="sec"><span>Mano kanalai</span></div>
+  <div id="meshBox" class="hidden"></div>
   <ul id="chList"></ul>
   <div class="actions">
     <button class="btn" id="newChBtn">＋ Sukurti</button>
@@ -437,7 +449,8 @@ function onMsg(ev){
       if (m.item) addHist(m.item);
       cmdSeen = {from:m.from, text:m.text, at:Date.now()};
       if (Date.now()-lastSentCmd < 3000 && m.from===myName){ toast(`${m.alarm?'🚨':'📢'} Išsiųsta: ${m.text}`); break; }
-      if (m.alarm) showAlarm(m.from, m.text); else showCmd(m.from, m.text, m.voice);
+      if (!seenCid(m.cid)) break;               // jau gauta per LoRa
+      if (m.alarm) showAlarm(m.from, m.text, m.cid); else showCmd(m.from, m.text, m.voice);
       break;
     case 'stop':
       if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
@@ -472,7 +485,7 @@ function afterName(){
 }
 
 // ---------- kanalų sąrašas ----------
-function showList(){ show('scrList'); renderList(); }
+function showList(){ show('scrList'); renderList(); if (window.renderMeshBox) renderMeshBox(); }
 function renderList(){
   $('hello').textContent = `Labas, ${myName}`;
   const ul=$('chList');
@@ -646,6 +659,7 @@ $('logoutBtn').onclick = () => {
 // ---------- kanalo ekranas ----------
 function enterChannelUI(history){
   show('scrChan');
+  $('scrChan').insertBefore($('cmdBar'), $('pttWrap'));  // komandos grįžta į kanalo ekraną
   $('chName').textContent = '#'+cur.name;
   renderChSub();
   talkerName=null; rxFrom=null; updateStatus();
@@ -692,6 +706,7 @@ $('menuBtn').onclick = () => {
   openModal(`<h2>#${esc(cur.name)}</h2>
     <button class="menuItem" id="miNoisy">🎧<span>Triukšminga aplinka: <b style="color:${noisy?'var(--ok)':'var(--muted)'}">${noisy?'ĮJUNGTA':'IŠJUNGTA'}</b><small>Šūviai nesustiprinami, balsas aiškesnis su BT ausinėmis</small></span></button>
     <button class="menuItem" id="miCmds">📢<span>Greitos komandos<small>Keisti tekstą, įrašyti savo balsu</small></span></button>
+    ${NATIVE?`<button class="menuItem" id="miMesh">📡<span>LoRa (Meshtastic): ${esc(MESH_LABEL[meshState.state]||'')}<small>STOP ir komandos be interneto</small></span></button>`:''}
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
     ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
     <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
@@ -703,6 +718,7 @@ $('menuBtn').onclick = () => {
     $('menuBtn').click();
   };
   $('miCmds').onclick = () => cmdEditor();
+  if ($('miMesh')) $('miMesh').onclick = () => meshModal();
   $('miMine').onclick = () => {
     upsertSaved({name:cur.name, hiddenBefore:Date.now()});
     $('hist').innerHTML=''; renderHistEmpty(); closeModal(); toast('Istorija išvalyta šiame telefone');
@@ -847,12 +863,36 @@ $('cmdChips').addEventListener('click', e=>{
   const c=cmds.find(x=>x.id===b.dataset.id); if(c) sendCmd(c);
 });
 
+// bendras komandos id: 4 simboliai = minutė (base36), 2 = atsitiktiniai. Pagal jį šalinami dublikatai ir senos žinutės.
+function newCid(){
+  const min = Math.floor(Date.now()/60000) % (36**4);
+  return min.toString(36).padStart(4,'0') + Math.floor(Math.random()*1296).toString(36).padStart(2,'0');
+}
+const seenIds = new Map();
+function seenCid(cid){            // true, jei naujas
+  if (!cid) return true;
+  if (seenIds.has(cid)) return false;
+  seenIds.set(cid, Date.now());
+  if (seenIds.size>300) seenIds.delete(seenIds.keys().next().value);
+  // programėlė galėjo tą pačią žinutę jau gauti per LoRa (ir paleisti sireną)
+  if (NATIVE) try{ if (Native311.markSeen(cid)===false) return false; }catch{}
+  return true;
+}
 function sendCmd(c){
-  if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
+  const online = ws && ws.readyState===1 && cur && scrVisible('scrChan');
+  const lora = meshReady();
+  if (!online && !lora){ flash('Nėra ryšio'); return; }
+  const cid = newCid(); seenCid(cid);
   lastSentCmd = Date.now();
-  wsSend({t:'cmd', text:c.text, alarm:!!c.alarm, voice:!!c.audio});
+  let via=[];
+  if (online){ wsSend({t:'cmd', text:c.text, alarm:!!c.alarm, voice:!!c.audio, cid}); via.push('internetu'); }
+  if (lora){
+    const msg = `${c.alarm?'🚨':'📢'} ${c.text} · ${myName} #${cid}`;
+    try{ if (Native311.meshSend(msg, cid)) via.push('LoRa'); }catch{}
+  }
   vib(c.alarm ? [100,50,100] : 40);
-  if (c.audio && !talking){ cmdAudio=c; wsSend({t:'start', cmd:c.text}); }
+  if (!online) toast(`${c.alarm?'🚨':'📢'} Išsiųsta ${via.join(' + ')}: ${c.text}`);
+  if (online && c.audio && !talking){ cmdAudio=c; wsSend({t:'start', cmd:c.text}); }
 }
 function sendStoredAudio(c){
   const a=b64dec(c.audio);
@@ -882,11 +922,11 @@ function siren(sec=3){
   sirenNodes.push(o);
 }
 function stopSiren(){ sirenNodes.forEach(o=>{ try{o.stop()}catch{} }); sirenNodes=[]; }
-function showAlarm(from, text){
+function showAlarm(from, text, cid, nativeDone){
   $('alarmTxt').textContent = text;
   $('alarmFrom').textContent = '— ' + from;
   $('alarm').classList.remove('hidden');
-  if (NATIVE){ try{ Native311.alarm(text, from); }catch{ siren(3); } } else siren(3);
+  if (NATIVE){ if (!nativeDone) try{ Native311.alarmId(text, from, cid||''); }catch{ siren(3); } } else siren(3);
   vib([600,200,600,200,600,200,1200]);
 }
 $('alarmOk').onclick = () => {
@@ -998,6 +1038,80 @@ if (NATIVE){
   b.innerHTML='📲 <span><b>Android programėlė</b><small>Veikia fone ir su Bluetooth mygtuku</small></span>';
   $('scrList').insertBefore(b, $('chList'));
 }
+
+// ---------- LoRa (Meshtastic) ----------
+let meshState = {state:'off'};
+const meshReady = () => NATIVE && meshState.state==='connected';
+const MESH_LABEL = {off:'Neprijungta', no_perm:'Reikia Bluetooth leidimo', bt_off:'Bluetooth išjungtas', connecting:'Jungiamasi…',
+  connected:'Prijungta', not_meshtastic:'Tai ne Meshtastic įrenginys', disconnected:'Ryšys nutrūko, jungiamasi iš naujo…', no_service:'Paleidžiama…'};
+function meshRefresh(){
+  if (!NATIVE) return;
+  try{ meshState = JSON.parse(Native311.meshInfo()); }catch{}
+  renderMeshBox(); renderMeshDot();
+  if ($('meshModalMark')) renderMeshModal();
+}
+window.nativeMeshStatus = () => meshRefresh();
+window.nativeMesh = (raw, alarmHandled) => {
+  const m = raw.trim().match(/^(🚨|📢)\s*(.+?)\s+·\s+(.+?)\s+#([0-9a-z]{6})$/u);
+  let alarm, text, from='LoRa', cid=null;
+  if (m){ alarm=m[1]==='🚨'; text=m[2]; from=m[3]; cid=m[4]; }
+  else { alarm=raw.startsWith('🚨'); text=raw.replace(/^(🚨|📢)\s*/u,''); }
+  if (cid){ if (seenIds.has(cid)) return; seenIds.set(cid, Date.now()); }
+  if (alarm) showAlarm(from+' · LoRa', text, cid, alarmHandled); else showCmd(from+' · LoRa', text, false);
+  if (scrVisible('scrChan')) addHist({id:0, from:from+' · LoRa', ts:Date.now(), dur:0, cmd:text, alarm});
+};
+function renderMeshDot(){
+  let d=$('meshDot');
+  if (!d){ d=document.createElement('span'); d.id='meshDot'; d.textContent='📡'; d.title='LoRa'; $('dot').after(d); }
+  d.className = meshReady() ? 'on' : (meshState.state==='off' ? 'off' : 'warn');
+  d.classList.toggle('hidden', !NATIVE || meshState.state==='off');
+}
+window.renderMeshBox = function(){
+  const box=$('meshBox');
+  if (!NATIVE){ box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  const ok=meshReady();
+  if ($('cmdBar').parentNode===box) $('scrChan').insertBefore($('cmdBar'), $('pttWrap')); // kad innerHTML jo nesunaikintų
+  box.innerHTML = `<div class="meshCard ${ok?'ok':''}">
+      <span class="mi">📡</span>
+      <span class="mt"><b>LoRa: ${esc(MESH_LABEL[meshState.state]||meshState.state)}</b>
+        <small>${ok ? esc(meshState.name||'') + ' · STOP ir komandos veikia be interneto' : 'STOP signalai per Meshtastic, kai nėra interneto'}</small></span>
+      <button class="ghost" id="meshSet">${meshState.state==='off'?'Prijungti':'Nustatyti'}</button>
+    </div>`;
+  $('meshSet').onclick = meshModal;
+  if (ok && scrVisible('scrList')) box.appendChild($('cmdBar'));
+};
+function meshModal(){ openModal('<div id="meshModalMark"></div>'); renderMeshModal(); }
+function renderMeshModal(){
+  let devs=null; try{ devs=JSON.parse(Native311.meshDevices()); }catch{}
+  const st=meshState, ok=meshReady();
+  const list = devs===null
+    ? `<p class="muted">Reikia leidimo naudoti Bluetooth.</p><button class="btn" id="mPerm">Leisti Bluetooth</button>`
+    : devs.length===0
+      ? `<p class="muted">Nėra suporuotų įrenginių. Suporuok Meshtastic mazgą telefono Bluetooth nustatymuose. PIN kodas rodomas mazgo ekrane arba numatytas <b>123456</b>.</p>`
+      : devs.sort((a,b)=>b.mesh-a.mesh).map(d=>`<button class="menuItem meshDev" data-a="${esc(d.address)}">${d.address===st.address?'✅':(d.mesh?'📡':'🔵')}<span>${esc(d.name)}<small>${esc(d.address)}${d.mesh?' · Meshtastic':''}</small></span></button>`).join('');
+  $('modalBox').innerHTML = `<div id="meshModalMark"></div><h2>📡 LoRa (Meshtastic)</h2>
+    <div class="meshCard ${ok?'ok':''}" style="margin-bottom:14px"><span class="mi">📡</span><span class="mt"><b>${esc(MESH_LABEL[st.state]||st.state)}</b><small>${esc(st.name||'Įrenginys nepasirinktas')}</small></span></div>
+    <div class="sec"><span>Pasirink mazgą</span></div>
+    ${list}
+    <button class="btn alt" id="mBt">Atidaryti Bluetooth nustatymus</button>
+    <div class="field" style="margin-top:14px"><label>Meshtastic kanalo numeris (0 = pagrindinis)</label>
+      <select id="mCh">${[0,1,2,3,4,5,6,7].map(i=>`<option ${i===st.channel?'selected':''}>${i}</option>`).join('')}</select></div>
+    ${ok?`<button class="btn" id="mTest">Siųsti bandomąją žinutę</button>`:''}
+    ${st.state!=='off'?`<button class="btn danger" id="mOff">Atjungti mazgą</button>`:''}
+    <p class="muted" style="font-size:13px">Prie mazgo vienu metu gali būti prijungta tik viena programėlė, todėl oficiali Meshtastic programėlė turi būti atjungta. Visi instruktoriai turi naudoti tą patį Meshtastic kanalą ir raktą.</p>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`;
+  if ($('mPerm')) $('mPerm').onclick = () => Native311.meshRequestPerm();
+  $('mBt').onclick = () => Native311.openBtSettings();
+  $('mCh').onchange = e => Native311.meshSetChannel(+e.target.value);
+  $('modalBox').querySelectorAll('.meshDev').forEach(b=>b.onclick=()=>{ Native311.meshConnect(b.dataset.a); toast('Jungiamasi…'); });
+  if ($('mTest')) $('mTest').onclick = () => { const cid=newCid(); seenCid(cid); const ok=Native311.meshSend(`📢 Bandymas · ${myName} #${cid}`, cid); toast(ok?'Bandomoji žinutė išsiųsta per LoRa':'Nepavyko išsiųsti'); };
+  if ($('mOff')) $('mOff').onclick = () => Native311.meshDisconnect();
+}
+if (NATIVE){ setTimeout(meshRefresh, 800); setInterval(meshRefresh, 5000); }
+
+// sąsaja veikia ir be interneto (išsaugoma telefone)
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
 // ---------- startas ----------
 let inviteData=null;

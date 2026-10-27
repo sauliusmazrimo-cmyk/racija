@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private AlwaysVisibleWebView web;
     private PermissionRequest pendingWebPermission;
     private static final int REQ_PERMS = 31;
+    private static final int REQ_BT = 32;
 
     /** WebView, kuris nesužino, kad ekranas užrakintas: puslapis neužmigdomas ir neribojamas. */
     public static class AlwaysVisibleWebView extends WebView {
@@ -113,6 +114,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQ_BT) {
+            MeshLink m = mesh();
+            if (m != null) meshStatus(m.info().toString());
+            return;
+        }
         if (pendingWebPermission != null) {
             if (hasMic()) pendingWebPermission.grant(pendingWebPermission.getResources());
             else pendingWebPermission.deny();
@@ -216,8 +222,57 @@ public class MainActivity extends Activity {
         });
     }
 
+    // ---------- Meshtastic tiltas ----------
+    static void meshStatus(String json) {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativeMeshStatus&&nativeMeshStatus(" + jsStr(json) + ")", null));
+    }
+
+    static void meshToJs(String raw, boolean alarmHandled) {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativeMesh&&nativeMesh(" + jsStr(raw) + "," + alarmHandled + ")", null));
+    }
+
+    private boolean hasBtPerm() {
+        return Build.VERSION.SDK_INT < 31
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private MeshLink mesh() { VoiceService s = VoiceService.inst; return s == null ? null : s.mesh; }
+
     class Bridge {
         @JavascriptInterface public void alarm(String text, String from) { VoiceService.alarm(text, from); }
+        @JavascriptInterface public void alarmId(String text, String from, String id) {
+            VoiceService.alarm(text, from); // dublikatai jau atmesti per markSeen
+        }
+        /** true, jei id dar nematytas (ir dabar pažymėtas). */
+        @JavascriptInterface public boolean markSeen(String id) { VoiceService s = VoiceService.inst; return s == null || s.markSeen(id); }
+        @JavascriptInterface public boolean meshSend(String text, String id) { return VoiceService.meshSend(text, id); }
+        @JavascriptInterface public String meshInfo() {
+            MeshLink m = mesh();
+            if (m == null) return "{\"state\":\"no_service\"}";
+            try { return m.info().put("perm", hasBtPerm()).toString(); } catch (Exception e) { return "{}"; }
+        }
+        @JavascriptInterface public String meshDevices() {
+            MeshLink m = mesh();
+            if (m == null || !hasBtPerm()) return "null";
+            org.json.JSONArray a = m.bondedDevices();
+            return a == null ? "null" : a.toString();
+        }
+        @JavascriptInterface public void meshRequestPerm() {
+            runOnUiThread(() -> {
+                if (Build.VERSION.SDK_INT >= 31 && !hasBtPerm())
+                    requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT);
+            });
+        }
+        @JavascriptInterface public void meshConnect(String address) { MeshLink m = mesh(); if (m != null) runOnUiThread(() -> m.connect(address)); }
+        @JavascriptInterface public void meshDisconnect() { MeshLink m = mesh(); if (m != null) runOnUiThread(m::disconnect); }
+        @JavascriptInterface public void meshSetChannel(int ch) { MeshLink m = mesh(); if (m != null) runOnUiThread(() -> m.setChannel(ch)); }
+        @JavascriptInterface public void openBtSettings() {
+            runOnUiThread(() -> { try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); } catch (Exception ignored) {} });
+        }
         @JavascriptInterface public void alarmStop() { VoiceService.alarmStop(); }
         @JavascriptInterface public boolean isNative() { return true; }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }

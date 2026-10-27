@@ -24,6 +24,11 @@ import android.os.PowerManager;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 /**
  * Foninė paslauga: laiko programėlę gyvą užrakinus ekraną (mikrofonas + garsas),
  * rodo pastovų pranešimą ir priima Bluetooth / ausinių mygtukus kaip PTT.
@@ -78,6 +83,77 @@ public class VoiceService extends Service {
             wifiLock.acquire();
         }
         setupMediaSession();
+        NotificationChannel cc = new NotificationChannel(CH_CMD, "Greitos komandos (LoRa)", NotificationManager.IMPORTANCE_HIGH);
+        cc.enableVibration(true);
+        nm.createNotificationChannel(cc);
+        mesh = new MeshLink(this, new MeshLink.Listener() {
+            @Override public void onMeshText(String text, long from) { handleMeshText(text); }
+            @Override public void onMeshStatus() { MainActivity.meshStatus(mesh.info().toString()); }
+        });
+    }
+
+    // ---------- Meshtastic (LoRa) ----------
+    static final String CH_CMD = "cmd";
+    MeshLink mesh;
+    private static final Pattern MSG = Pattern.compile("^(🚨|📢)\\s*(.+?)\\s+·\\s+(.+?)\\s+#([0-9a-z]{6})$");
+    private static final int MIN_MOD = 36 * 36 * 36 * 36;
+    private final Map<String, Boolean> seen = new LinkedHashMap<String, Boolean>() {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, Boolean> e) { return size() > 200; }
+    };
+
+    /** true, jei id naujas (dar nematytas). */
+    synchronized boolean markSeen(String id) {
+        if (id == null || id.isEmpty()) return true;
+        if (seen.containsKey(id)) return false;
+        seen.put(id, true);
+        return true;
+    }
+
+    private static boolean stale(String id) {
+        try {
+            int minute = Integer.parseInt(id.substring(0, 4), 36);
+            int now = (int) ((System.currentTimeMillis() / 60000L) % MIN_MOD);
+            int diff = ((now - minute) % MIN_MOD + MIN_MOD) % MIN_MOD;
+            return diff > 3 && diff < MIN_MOD - 3;
+        } catch (Exception e) { return false; }
+    }
+
+    private void handleMeshText(String raw) {
+        String text = raw.trim();
+        boolean alarm; String cmd, who, id = null;
+        Matcher m = MSG.matcher(text);
+        if (m.matches()) {
+            alarm = m.group(1).equals("🚨"); cmd = m.group(2); who = m.group(3); id = m.group(4);
+            if (stale(id)) return;
+        } else if (text.startsWith("🚨") || text.startsWith("📢")) {
+            alarm = text.startsWith("🚨"); cmd = text.substring(2).trim(); who = "LoRa";
+        } else {
+            return; // kitos Meshtastic žinutės mūsų neliečia
+        }
+        if (!markSeen(id)) return;
+        if (alarm) doAlarm(cmd, who + " · LoRa");
+        else cmdNotify(cmd, who);
+        MainActivity.meshToJs(text, alarm);
+    }
+
+    private void cmdNotify(String cmd, String who) {
+        Intent open = new Intent(this, MainActivity.class).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(this, 3, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification n = new Notification.Builder(this, CH_CMD)
+                .setSmallIcon(R.drawable.ic_mic)
+                .setContentTitle("📢 " + cmd)
+                .setContentText(who + " · LoRa")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        getSystemService(NotificationManager.class).notify(3, n);
+    }
+
+    static boolean meshSend(String text, String id) {
+        VoiceService s = inst;
+        if (s == null || s.mesh == null) return false;
+        s.markSeen(id);
+        return s.mesh.send(text);
     }
 
     @SuppressWarnings("deprecation")
@@ -229,6 +305,7 @@ public class VoiceService extends Service {
         inst = null;
         handler.removeCallbacksAndMessages(null);
         releaseTone();
+        if (mesh != null) mesh.shutdown();
         if (session != null) session.release();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
