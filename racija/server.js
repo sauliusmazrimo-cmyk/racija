@@ -143,6 +143,7 @@ function endTalk(ws, forced = false) {
   let item = null;
   if (ch && data.length >= MIN_BYTES) {
     item = { id: cur.id, from: cur.from, ts: cur.ts, dur: +(data.length / RATE).toFixed(1) };
+    if (cur.cmd) item.voiceCmd = cur.cmd;
     fs.writeFile(audioFile(item.id), data, () => {});
     ch.history.push(item);
     while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
@@ -255,12 +256,33 @@ wss.on('connection', (ws) => {
         if (c.talker && c.talker !== ws) return send(ws, { t: 'busy', by: c.talker.user });
         if (c.talker === ws) return send(ws, { t: 'granted', id: c.current.id });
         c.talker = ws;
-        c.current = { id: ++db.seq, from: ws.user, ts: Date.now(), chunks: [] };
+        const cmd = m.cmd ? String(m.cmd).slice(0, 40) : undefined;
+        c.current = { id: ++db.seq, from: ws.user, ts: Date.now(), chunks: [], cmd };
         saveDb();
         c.timer = setTimeout(() => endTalk(ws, true), MAX_TALK_MS);
         send(ws, { t: 'granted', id: c.current.id });
-        broadcast(ws.chan, { t: 'start', from: ws.user, id: c.current.id }, ws);
+        broadcast(ws.chan, { t: 'start', from: ws.user, id: c.current.id, cmd }, ws);
         return presence(ws.chan);
+      }
+
+      // ----- greitos komandos ir STOP signalas -----
+      case 'cmd': {
+        if (!ch) return;
+        const now = Date.now();
+        if (now - (ws.lastCmd || 0) < 800) return; // apsauga nuo dvigubo paspaudimo
+        ws.lastCmd = now;
+        const text = String(m.text || '').trim().slice(0, 40) || 'Komanda';
+        const alarm = !!m.alarm;
+        const c = live.get(ws.chan);
+        // STOP nutraukia bet kurį tuo metu kalbantį
+        if (alarm && c && c.talker && c.talker !== ws) {
+          const t = c.talker; endTalk(t, 'alarm'); send(t, { t: 'toast', msg: `🚨 ${ws.user}: ${text}` });
+        }
+        const item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: text, alarm };
+        ch.history.push(item);
+        while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
+        saveDb();
+        return broadcast(ws.chan, { t: 'cmd', from: ws.user, text, alarm, voice: !!m.voice, item });
       }
       case 'stop':
         return endTalk(ws);
@@ -364,8 +386,8 @@ app.get('/audio/:id', (req, res) => {
 app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.3', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  ok: true, version: '0.4', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   dataDir: DATA_DIR, persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000
 }));
 
-server.listen(PORT, () => console.log(`Racija v0.3: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.4: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));

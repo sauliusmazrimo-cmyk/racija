@@ -193,7 +193,32 @@ public class MainActivity extends Activity {
         a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativePtt&&nativePtt('" + mode + "')", null));
     }
 
+    /** STOP signalas: rodyti virš užrakinto ekrano ir įjungti ekraną. */
+    static void wakeForAlarm() {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= 27) { a.setShowWhenLocked(true); a.setTurnScreenOn(true); }
+            else a.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+            a.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+    }
+
+    static void alarmDone() {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= 27) { a.setShowWhenLocked(false); a.setTurnScreenOn(false); }
+            else a.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                    | android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+            a.getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+    }
+
     class Bridge {
+        @JavascriptInterface public void alarm(String text, String from) { VoiceService.alarm(text, from); }
+        @JavascriptInterface public void alarmStop() { VoiceService.alarmStop(); }
         @JavascriptInterface public boolean isNative() { return true; }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public void setStatus(String text) { VoiceService.updateStatus(text); }

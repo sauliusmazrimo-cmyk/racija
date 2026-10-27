@@ -8,6 +8,13 @@ import android.app.Service;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.net.wifi.WifiManager;
@@ -44,6 +51,12 @@ public class VoiceService extends Service {
         NotificationChannel ch = new NotificationChannel(CH, "311 VoiceCH ryšys", NotificationManager.IMPORTANCE_LOW);
         ch.setShowBadge(false);
         nm.createNotificationChannel(ch);
+        NotificationChannel al = new NotificationChannel(CH_ALARM, "STOP signalai", NotificationManager.IMPORTANCE_HIGH);
+        al.setBypassDnd(true);
+        al.setSound(null, null); // garsą groja ToneGenerator per žadintuvo srautą
+        al.enableVibration(false);
+        al.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        nm.createNotificationChannel(al);
 
         Notification n = build();
         if (Build.VERSION.SDK_INT >= 30) {
@@ -125,6 +138,75 @@ public class VoiceService extends Service {
                 .build();
     }
 
+    // ---------- STOP signalas ----------
+    static final String CH_ALARM = "alarm";
+    private ToneGenerator tone;
+    private int prevAlarmVol = -1;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+
+    static void alarm(String text, String from) {
+        VoiceService s = inst;
+        if (s != null) s.handler.post(() -> s.doAlarm(text, from));
+    }
+    static void alarmStop() {
+        VoiceService s = inst;
+        if (s != null) s.handler.post(s::stopAlarm);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void doAlarm(String text, String from) {
+        stopAlarm();
+        AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+        try {
+            prevAlarmVol = am.getStreamVolume(AudioManager.STREAM_ALARM);
+            am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0);
+        } catch (Exception ignored) { prevAlarmVol = -1; }
+        try {
+            tone = new ToneGenerator(AudioManager.STREAM_ALARM, ToneGenerator.MAX_VOLUME);
+            tone.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 4000);
+        } catch (Exception ignored) {}
+        try {
+            Vibrator v = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+            long[] pattern = {0, 600, 200, 600, 200, 600, 200, 1200};
+            AudioAttributes aa = new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build();
+            v.vibrate(VibrationEffect.createWaveform(pattern, -1), aa);
+        } catch (Exception ignored) {}
+
+        // pranešimas, kuris pažadina ekraną ir atidaro programėlę
+        Intent open = new Intent(this, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra("alarm", true);
+        PendingIntent pi = PendingIntent.getActivity(this, 2, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification n = new Notification.Builder(this, CH_ALARM)
+                .setSmallIcon(R.drawable.ic_mic)
+                .setContentTitle("🚨 " + text)
+                .setContentText(from)
+                .setCategory(Notification.CATEGORY_ALARM)
+                .setContentIntent(pi)
+                .setFullScreenIntent(pi, true)
+                .setAutoCancel(true)
+                .build();
+        getSystemService(NotificationManager.class).notify(2, n);
+        MainActivity.wakeForAlarm();
+        handler.postDelayed(this::releaseTone, 4500);
+    }
+
+    private void releaseTone() {
+        if (tone != null) { try { tone.stopTone(); tone.release(); } catch (Exception ignored) {} tone = null; }
+        if (prevAlarmVol >= 0) {
+            try { ((AudioManager) getSystemService(AUDIO_SERVICE)).setStreamVolume(AudioManager.STREAM_ALARM, prevAlarmVol, 0); } catch (Exception ignored) {}
+            prevAlarmVol = -1;
+        }
+    }
+
+    private void stopAlarm() {
+        handler.removeCallbacksAndMessages(null);
+        releaseTone();
+        try { ((Vibrator) getSystemService(VIBRATOR_SERVICE)).cancel(); } catch (Exception ignored) {}
+        getSystemService(NotificationManager.class).cancel(2);
+        MainActivity.alarmDone();
+    }
+
     static void updateStatus(String text) {
         if (text == null || text.equals(status)) return;
         status = text;
@@ -145,6 +227,8 @@ public class VoiceService extends Service {
     @Override
     public void onDestroy() {
         inst = null;
+        handler.removeCallbacksAndMessages(null);
+        releaseTone();
         if (session != null) session.release();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();

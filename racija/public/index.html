@@ -120,6 +120,42 @@ input:focus{border-color:var(--accent)}
 .adMeta{font-size:12px;margin:2px 0 10px}
 .adBtns{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
 .adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
+/* komandos */
+#cmdBar{margin-top:10px}
+#stopBtn{position:relative;overflow:hidden;width:100%;height:58px;border:0;border-radius:14px;background:#7a1d16;color:#fff;
+  display:flex;align-items:center;justify-content:center;gap:10px;font-size:17px;letter-spacing:.5px;
+  user-select:none;-webkit-user-select:none;touch-action:none;box-shadow:inset 0 0 0 2px rgba(255,90,70,.5)}
+#stopBtn b,#stopBtn small{position:relative;z-index:1}
+#stopBtn small{font-size:12px;opacity:.75}
+#stopBtn .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#e74c3c}
+#stopBtn.hold .fill{width:100%;transition:width 1s linear}
+#cmdChips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
+#cmdChips::-webkit-scrollbar{display:none}
+.cmdChip{flex:none;padding:12px 16px;border-radius:12px;border:1px solid rgba(255,138,31,.45);background:rgba(255,138,31,.12);
+  color:var(--text);font-weight:700;font-size:15px;white-space:nowrap}
+.cmdChip.edit{border-color:var(--line);background:var(--panel);color:var(--muted);font-weight:500}
+.cmdChip:active{transform:scale(.96)}
+#hist li.cmd .who{color:var(--accent2)}
+#hist li.alarm{border-color:rgba(231,76,60,.6);background:rgba(231,76,60,.12)}
+#hist li.alarm .who{color:#ff6b5b}
+/* signalas */
+#alarm{position:fixed;inset:0;z-index:30;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:#b3160c;color:#fff;text-align:center;padding:24px;animation:flashA .5s steps(1) infinite}
+@keyframes flashA{50%{background:#3a0603}}
+#alarm .big{font-size:72px;font-weight:900;letter-spacing:2px}
+#alarm .txt{font-size:28px;font-weight:800}
+#alarm .from{font-size:18px;opacity:.85}
+#alarm button{margin-top:30px;padding:18px 40px;border:0;border-radius:16px;background:#fff;color:#b3160c;font-size:20px;font-weight:900}
+#cmdBanner{position:fixed;left:16px;right:16px;top:calc(12px + env(safe-area-inset-top));z-index:25;padding:16px 18px;border-radius:16px;
+  background:#ff8a1f;color:#111;box-shadow:0 10px 40px rgba(0,0,0,.5);text-align:center;animation:up .18s ease-out}
+#cmdBanner b{display:block;font-size:24px}
+#cmdBanner small{font-size:14px;opacity:.8}
+.cmdRow{display:flex;align-items:center;gap:8px;padding:10px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);margin-bottom:8px}
+.cmdRow input{flex:1;min-width:0;padding:10px;font-size:15px}
+.cmdRow button{flex:none;width:44px;height:44px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:17px}
+.cmdRow button.rec{background:#7a1d16;border-color:#e74c3c}
+.cmdRow button.rec.on{background:#e74c3c;animation:flashA .6s steps(1) infinite}
+.cmdRow button.has{border-color:var(--ok)}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -168,6 +204,10 @@ input:focus{border-color:var(--accent)}
   </div>
 
   <div id="status">Tylu</div>
+  <div id="cmdBar">
+    <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
+    <div id="cmdChips"></div>
+  </div>
   <div id="pttWrap"><button id="ptt">KALBĖTI<small>laikyk nuspaudęs</small></button></div>
 
   <div class="sec"><span>Prisijungę (<b id="cnt">0</b>)</span></div>
@@ -177,6 +217,13 @@ input:focus{border-color:var(--accent)}
 </section>
 
 <div id="modal" class="hidden"><div class="box" id="modalBox"></div></div>
+<div id="alarm" class="hidden">
+  <div class="big">🚨 STOP</div>
+  <div class="txt" id="alarmTxt"></div>
+  <div class="from" id="alarmFrom"></div>
+  <button id="alarmOk">SUPRATAU</button>
+</div>
+<div id="cmdBanner" class="hidden"><b id="cbTxt"></b><small id="cbFrom"></small></div>
 <div id="toast" style="opacity:0"></div>
 
 <script>
@@ -222,22 +269,45 @@ function linToMu(s){
 
 // ---------- garsas ----------
 let ctx=null, stream=null, gainOut=null, talking=false, playHead=0, dsPos=0;
+let proc=null, micSrc=null, micChain=null, recBuf=null;
+let noisy = store.get('vc_noisy','0')==='1';   // triukšmingos aplinkos režimas
 async function initAudio(){
   ctx = ctx || new (window.AudioContext||window.webkitAudioContext)();
   if (ctx.state==='suspended') await ctx.resume();
   if (!gainOut){ gainOut=ctx.createGain(); gainOut.gain.value=1.4; gainOut.connect(ctx.destination); }
-  if (!stream){
-    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
-    const src = ctx.createMediaStreamSource(stream);
-    const proc = ctx.createScriptProcessor(4096,1,1);
+  if (!proc){
+    proc = ctx.createScriptProcessor(4096,1,1);
     const mute = ctx.createGain(); mute.gain.value=0;
-    src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+    proc.connect(mute); mute.connect(ctx.destination);
     proc.onaudioprocess = e => {
-      if (!talking || !ws || ws.readyState!==1) return;
+      const live = talking && ws && ws.readyState===1;
+      if (!recBuf && !live) return;
       const out = encode(e.inputBuffer.getChannelData(0));
-      if (out.length) ws.send(out);
+      if (!out.length) return;
+      if (recBuf) recBuf.push(out); else ws.send(out);
     };
   }
+  if (!stream){
+    // triukšme: be automatinio garsumo kėlimo (šūviai nesustiprinami) + ribotuvas smūginiams garsams
+    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:!noisy}});
+    micSrc = ctx.createMediaStreamSource(stream);
+    if (noisy){
+      micChain = ctx.createDynamicsCompressor();
+      micChain.threshold.value=-30; micChain.knee.value=6; micChain.ratio.value=12; micChain.attack.value=0.002; micChain.release.value=0.15;
+      const boost = ctx.createGain(); boost.gain.value=2.2;
+      micSrc.connect(micChain); micChain.connect(boost); boost.connect(proc);
+      micChain._out = boost;
+    } else {
+      micChain = null; micSrc.connect(proc);
+    }
+  }
+}
+async function restartMic(){
+  if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  try{ micSrc && micSrc.disconnect(); }catch{}
+  try{ micChain && micChain._out.disconnect(); }catch{}
+  micSrc=null; micChain=null;
+  await initAudio();
 }
 function encode(input){
   const ratio = ctx.sampleRate / RATE, out = [];
@@ -353,12 +423,25 @@ function onMsg(ev){
       if (m.action==='adminDelete'){ saved=saved.filter(c=>c.name!==m.channel); saveList(); renderList(); }
       if (m.action==='adminPassword' && pending && pending.pwFor===m.channel){ const s=findSaved(m.channel); if(s){ s.pw=pending.pw; saveList(); } }
       pending=null; renderAdmin(m.channels); break;
-    case 'granted': if ($('ptt').classList.contains('down')){ talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else wsSend({t:'stop'}); break;
-    case 'busy': vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); $('ptt').classList.remove('down'); break;
-    case 'start': rxFrom=m.from; beep(660); vib(20); updateStatus(); break;
+    case 'granted':
+      if (cmdAudio){ sendStoredAudio(cmdAudio); cmdAudio=null; break; }
+      if ($('ptt').classList.contains('down')){ talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else wsSend({t:'stop'}); break;
+    case 'busy':
+      vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); $('ptt').classList.remove('down');
+      if (cmdAudio){ cmdAudio=null; } break;
+    case 'start':
+      rxFrom=m.from; beep(660); vib(20);
+      if (m.cmd && !recentCmd(m.from, m.cmd)) showCmd(m.from, m.cmd, true);
+      updateStatus(); break;
+    case 'cmd':
+      if (m.item) addHist(m.item);
+      cmdSeen = {from:m.from, text:m.text, at:Date.now()};
+      if (Date.now()-lastSentCmd < 3000 && m.from===myName){ toast(`${m.alarm?'🚨':'📢'} Išsiųsta: ${m.text}`); break; }
+      if (m.alarm) showAlarm(m.from, m.text); else showCmd(m.from, m.text, m.voice);
+      break;
     case 'stop':
       if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
-      if (m.forced && talking){ stopTalk(true); flash('Pasiektas 60 s limitas'); }
+      if (m.forced && talking){ stopTalk(true); if (m.forced!=='alarm') flash('Pasiektas 60 s limitas'); }
       if (m.item) addHist(m.item);
       updateStatus(); break;
     case 'cleared': $('hist').innerHTML=''; renderHistEmpty(); toast('Istorija išvalyta'); break;
@@ -607,11 +690,19 @@ $('inviteBtn').onclick = () => {
 $('menuBtn').onclick = () => {
   const o = cur.owner;
   openModal(`<h2>#${esc(cur.name)}</h2>
+    <button class="menuItem" id="miNoisy">🎧<span>Triukšminga aplinka: <b style="color:${noisy?'var(--ok)':'var(--muted)'}">${noisy?'ĮJUNGTA':'IŠJUNGTA'}</b><small>Šūviai nesustiprinami, balsas aiškesnis su BT ausinėmis</small></span></button>
+    <button class="menuItem" id="miCmds">📢<span>Greitos komandos<small>Keisti tekstą, įrašyti savo balsu</small></span></button>
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
     ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
     <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
     <button class="menuItem red" id="miDel">⛔<span>Ištrinti kanalą<small>Visi nariai bus atjungti</small></span></button>`:''}
     <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+  $('miNoisy').onclick = async () => {
+    noisy=!noisy; store.set('vc_noisy', noisy?'1':'0');
+    try{ await restartMic(); toast(noisy?'🎧 Triukšmingos aplinkos režimas įjungtas':'Įprastas režimas'); }catch{ toast('Nepavyko perjungti mikrofono'); }
+    $('menuBtn').click();
+  };
+  $('miCmds').onclick = () => cmdEditor();
   $('miMine').onclick = () => {
     upsertSaved({name:cur.name, hiddenBefore:Date.now()});
     $('hist').innerHTML=''; renderHistEmpty(); closeModal(); toast('Istorija išvalyta šiame telefone');
@@ -707,8 +798,14 @@ function addHist(i){
   const li=document.createElement('li');
   const d=new Date(i.ts), today=new Date().toDateString()===d.toDateString();
   const time=(today?'':d.toLocaleDateString('lt-LT',{month:'2-digit',day:'2-digit'})+' ')+d.toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
-  li.innerHTML=`<span class="who">${esc(i.from)}</span><span class="t">${time} · ${i.dur}s</span><button aria-label="Groti">▶</button>`;
-  li.querySelector('button').onclick=()=>playHist(i.id, li);
+  if (i.cmd){
+    li.className = i.alarm ? 'alarm' : 'cmd';
+    li.innerHTML=`<span class="who">${i.alarm?'🚨':'📢'} ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)}</small></span><span class="t">${time}</span>`;
+  } else {
+    if (i.voiceCmd) li.className='cmd';
+    li.innerHTML=`<span class="who">${i.voiceCmd?'🎙️ ':''}${esc(i.from)}</span><span class="t">${time} · ${i.dur}s</span><button aria-label="Groti">▶</button>`;
+    li.querySelector('button').onclick=()=>playHist(i.id, li);
+  }
   $('hist').prepend(li);
   while ($('hist').children.length>50) $('hist').lastChild.remove();
 }
@@ -722,6 +819,150 @@ function playHist(id, li){
 
 async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') await navigator.wakeLock.request('screen'); }catch{} }
 document.addEventListener('visibilitychange', ()=>{ if (cur && document.visibilityState==='visible'){ keepAwake(); ensureWs(); } });
+
+// ---------- greitos komandos ----------
+const DEFAULT_CMDS = [
+  {id:'stop',  text:'Stop visiems', alarm:true},
+  {id:'tikra', text:'Tikra, tikra, tikra'},
+  {id:'judam', text:'Judam'}
+];
+let cmds = (()=>{ try{ const c=JSON.parse(store.get('vc_cmds','null')); if(Array.isArray(c)&&c.length) return c; }catch{} return DEFAULT_CMDS.map(c=>({...c})); })();
+const saveCmds = () => { try{ localStorage.setItem('vc_cmds', JSON.stringify(cmds)); }catch{ toast('Nepavyko išsaugoti įrašo (per mažai vietos)'); } };
+let cmdAudio=null, lastSentCmd=0, cmdSeen={};
+const stopCmd = () => cmds.find(c=>c.alarm) || cmds[0];
+const recentCmd = (from,text) => cmdSeen.from===from && cmdSeen.text===text && Date.now()-cmdSeen.at<4000;
+
+const b64enc = u8 => { let s=''; for (let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s); };
+const b64dec = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+
+function renderCmdChips(){
+  $('cmdChips').innerHTML = cmds.filter(c=>!c.alarm).map(c=>
+    `<button class="cmdChip" data-id="${esc(c.id)}">${c.audio?'🎙️ ':''}${esc(c.text)}</button>`).join('')
+    + `<button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
+  $('stopBtn').querySelector('b').textContent = '🚨 ' + stopCmd().text.toUpperCase();
+}
+$('cmdChips').addEventListener('click', e=>{
+  if (e.target.closest('#cmdEdit')){ cmdEditor(); return; }
+  const b=e.target.closest('.cmdChip[data-id]'); if(!b) return;
+  const c=cmds.find(x=>x.id===b.dataset.id); if(c) sendCmd(c);
+});
+
+function sendCmd(c){
+  if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
+  lastSentCmd = Date.now();
+  wsSend({t:'cmd', text:c.text, alarm:!!c.alarm, voice:!!c.audio});
+  vib(c.alarm ? [100,50,100] : 40);
+  if (c.audio && !talking){ cmdAudio=c; wsSend({t:'start', cmd:c.text}); }
+}
+function sendStoredAudio(c){
+  const a=b64dec(c.audio);
+  for (let i=0;i<a.length;i+=3200) ws.send(a.subarray(i,i+3200));
+  wsSend({t:'stop'});
+}
+
+// STOP: laikyti 1 s, kad nebūtų netyčinio paspaudimo
+(()=>{
+  const b=$('stopBtn'); let tm=null;
+  const down = e => { e.preventDefault(); b.classList.add('hold'); vib(20);
+    tm=setTimeout(()=>{ tm=null; b.classList.remove('hold'); sendCmd(stopCmd()); }, 1000); };
+  const up = () => { if (tm){ clearTimeout(tm); tm=null; } b.classList.remove('hold'); };
+  b.addEventListener('pointerdown', down); b.addEventListener('pointerup', up);
+  b.addEventListener('pointercancel', up); b.addEventListener('pointerleave', up);
+  b.addEventListener('contextmenu', e=>e.preventDefault());
+})();
+
+// ----- gavėjo pusė -----
+let sirenNodes=[];
+function siren(sec=3){
+  if (!ctx) return;
+  const o=ctx.createOscillator(), g=ctx.createGain(), t=ctx.currentTime;
+  o.type='square'; g.gain.value=0.35;
+  for (let i=0;i<sec*2;i++){ o.frequency.setValueAtTime(700,t+i*0.5); o.frequency.linearRampToValueAtTime(1500,t+i*0.5+0.45); }
+  o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+sec);
+  sirenNodes.push(o);
+}
+function stopSiren(){ sirenNodes.forEach(o=>{ try{o.stop()}catch{} }); sirenNodes=[]; }
+function showAlarm(from, text){
+  $('alarmTxt').textContent = text;
+  $('alarmFrom').textContent = '— ' + from;
+  $('alarm').classList.remove('hidden');
+  if (NATIVE){ try{ Native311.alarm(text, from); }catch{ siren(3); } } else siren(3);
+  vib([600,200,600,200,600,200,1200]);
+}
+$('alarmOk').onclick = () => {
+  $('alarm').classList.add('hidden'); stopSiren(); vib(0);
+  if (NATIVE) try{ Native311.alarmStop(); }catch{}
+};
+function showCmd(from, text, voice){
+  $('cbTxt').textContent = '📢 ' + text;
+  $('cbFrom').textContent = from;
+  $('cmdBanner').classList.remove('hidden');
+  clearTimeout(showCmd.t); showCmd.t=setTimeout(()=>$('cmdBanner').classList.add('hidden'), 4500);
+  beep(988); beep(1319, ctx?ctx.currentTime+0.12:0);
+  vib([80,60,80]);
+  if (!voice) speak(text);
+}
+$('cmdBanner').onclick = () => $('cmdBanner').classList.add('hidden');
+function speak(text){
+  try{
+    if (!('speechSynthesis' in window)) return;
+    const u=new SpeechSynthesisUtterance(text);
+    const v=speechSynthesis.getVoices().find(v=>/^lt/i.test(v.lang));
+    if (v) u.voice=v; u.lang = v ? v.lang : 'lt-LT'; u.rate=1.05;
+    speechSynthesis.speak(u);
+  }catch{}
+}
+
+// ----- komandų redaktorius -----
+function cmdEditor(){
+  const rows = cmds.map((c,i)=>`
+    <div class="cmdRow" data-i="${i}">
+      <span style="font-size:20px">${c.alarm?'🚨':'📢'}</span>
+      <input value="${esc(c.text)}" maxlength="40" data-f="text">
+      <button class="rec" data-f="rec" title="Laikyk ir kalbėk">🎙️</button>
+      <button class="${c.audio?'has':''}" data-f="play" ${c.audio?'':'disabled style="opacity:.35"'}>▶</button>
+      ${c.alarm?'':'<button data-f="del">✕</button>'}
+    </div>`).join('');
+  openModal(`<h2>📢 Greitos komandos</h2>
+    <p class="muted" style="margin-top:-8px">Laikyk 🎙️ ir pasakyk komandą savo balsu (iki 5 s). Be įrašo kiti matys užrašą ir išgirs signalą.</p>
+    ${rows}
+    <button class="btn alt" id="cmdAdd">＋ Pridėti komandą</button>
+    <button class="btn alt" id="cmdReset">Atstatyti numatytas</button>
+    <button class="btn" onclick="closeModal()">Baigti</button>`);
+  const box=$('modalBox');
+  box.querySelectorAll('.cmdRow').forEach(row=>{
+    const c=cmds[+row.dataset.i];
+    row.querySelector('[data-f=text]').onchange = e => { c.text = e.target.value.trim() || c.text; saveCmds(); renderCmdChips(); };
+    const rec=row.querySelector('[data-f=rec]');
+    let tm=null;
+    const start = async e => {
+      e.preventDefault();
+      if (!(await audioOk())) return;
+      dsPos=0; recBuf=[]; rec.classList.add('on'); vib(30);
+      tm=setTimeout(stop, 5000);
+    };
+    const stop = () => {
+      if (!recBuf) return;
+      clearTimeout(tm); rec.classList.remove('on');
+      setTimeout(()=>{ // paskutinis garso blokas
+        const parts=recBuf; recBuf=null;
+        const len=parts.reduce((a,p)=>a+p.length,0);
+        if (len < RATE*0.4){ toast('Per trumpa – laikyk mygtuką kalbėdamas'); return; }
+        const all=new Uint8Array(len); let o=0; parts.forEach(p=>{ all.set(p,o); o+=p.length; });
+        c.audio=b64enc(all); saveCmds(); renderCmdChips(); toast('Įrašyta: '+c.text); cmdEditor();
+      }, 250);
+    };
+    rec.addEventListener('pointerdown', start);
+    rec.addEventListener('pointerup', stop); rec.addEventListener('pointercancel', stop); rec.addEventListener('pointerleave', stop);
+    rec.addEventListener('contextmenu', e=>e.preventDefault());
+    row.querySelector('[data-f=play]').onclick = async () => { if (!c.audio || !(await audioOk())) return; const a=b64dec(c.audio); for (let i=0;i<a.length;i+=3200) playChunk(a.subarray(i,i+3200)); };
+    const del=row.querySelector('[data-f=del]');
+    if (del) del.onclick = () => { cmds.splice(+row.dataset.i,1); saveCmds(); renderCmdChips(); cmdEditor(); };
+  });
+  $('cmdAdd').onclick = () => { cmds.push({id:'c'+Date.now(), text:'Nauja komanda'}); saveCmds(); renderCmdChips(); cmdEditor(); };
+  $('cmdReset').onclick = () => { cmds=DEFAULT_CMDS.map(c=>({...c})); saveCmds(); renderCmdChips(); cmdEditor(); };
+}
+renderCmdChips();
 
 // ---------- Android programėlė ----------
 const NATIVE = !!(window.Native311 && Native311.isNative && Native311.isNative());
