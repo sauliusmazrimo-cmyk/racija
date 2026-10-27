@@ -1,19 +1,17 @@
-# Racija v0.2
+# Racija v0.3
 
-Push-to-talk racija vairuotojams: laikai mygtuką ir kalbi, kiti girdi realiu laiku.
+Push-to-talk racija: laikai mygtuką ir kalbi, kiti girdi realiu laiku.
 
 ## Funkcijos
-- Grupės (kanalai) su slaptažodžiais. Kūrėjas (👑) gali išvalyti istoriją visiems, keisti slaptažodį ir ištrinti kanalą.
-- Kvietimas: QR kodas, nuoroda (WhatsApp/Viber) arba pavadinimas ir slaptažodis.
-- Istoriją galima išvalyti tik sau arba visiems (kūrėjui).
-- Atsijungimas, kanalų sąrašas telefone.
-- Kanalai ir įrašai saugomi diske (`data/`), todėl išlieka po perkrovimo.
+- Grupės (kanalai) su slaptažodžiais. Kvietimas: QR kodas, nuoroda arba pavadinimas ir slaptažodis.
+- Kūrėjai (👑): gali valyti istoriją visiems, keisti slaptažodį, ištrinti kanalą, paskirti kitus kūrėjus (paspaudus nario vardą).
+- Administratorius (🛡️): mato visus kanalus, įeina be slaptažodžio, keičia slaptažodžius, nuima kūrėjus, trina kanalus.
+- Įrašai automatiškai trinami po 48 val.
 
-## Railway: duomenų išsaugojimas
-Be Volume disko duomenys dings po kiekvieno deploy. Ką padaryti:
-Ctrl+K → "Volume" → pasirink servisą `racija` → Mount path `/data`.
-Railway pats nustatys `RAILWAY_VOLUME_MOUNT_PATH`, ir serveris ten saugos duomenis.
+## Railway kintamieji (Variables)
+- `ADMIN_KEY`: administratoriaus raktas (būtinas admin režimui).
+- `RETENTION_HOURS`: po kiek valandų trinti įrašus (numatyta 48).
 
-## Lokaliai
-    npm install
-    npm start
+## Railway Volume
+Ctrl+K → "Volume" → servisas `racija` → Mount path `/data`. Be jo duomenys dings po kiekvieno deploy.
+Patikrinti: /health → `"persistent": true`.

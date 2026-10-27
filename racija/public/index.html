@@ -108,6 +108,14 @@ input:focus{border-color:var(--accent)}
   word-break:break-all;color:var(--muted);margin-bottom:12px}
 .cred{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:15px;margin-bottom:14px}
 .cred span{color:var(--muted)}
+.chip.own::before{content:'👑 '}
+.chip.tap{cursor:pointer}
+.adRow{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.adTop{display:flex;justify-content:space-between;align-items:center;font-size:16px}
+.adTop .on{color:var(--ok);font-size:13px;font-weight:600}
+.adMeta{font-size:12px;margin:2px 0 10px}
+.adBtns{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
+.adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#243040;
   color:var(--text);padding:12px 18px;border-radius:12px;font-size:14px;z-index:20;transition:opacity .2s;pointer-events:none}
 </style>
@@ -130,6 +138,7 @@ input:focus{border-color:var(--accent)}
 <section id="scrList" class="scr hidden">
   <div class="top">
     <div class="grow"><div class="brand">Racij<span>a</span></div><div class="hello" id="hello"></div></div>
+    <button class="icon" id="adminBtn" aria-label="Administratorius">🛡️</button>
     <button class="ghost" id="logoutBtn">Atsijungti</button>
   </div>
   <div class="sec"><span>Mano kanalai</span></div>
@@ -253,7 +262,11 @@ function beep(freq, at=0, dur=0.07){
 
 // ---------- ryšys ----------
 let ws=null, cur=null /* {name,pw,owner,ticket} */, pending=null, rxFrom=null, talkerName=null, reconnectTimer=null;
-let wantOpen=false, sendQueue=[];
+let wantOpen=false, sendQueue=[], me={id:0,owner:false,admin:false}, lastUsers=[];
+let adminKey = store.get('racija_admin','');
+const joinMsg = c => c.viaAdmin
+  ? {t:'adminJoin', name:myName, channel:c.name, token}
+  : {t:'join', name:myName, channel:c.name, password:c.pw, token};
 function ensureWs(){
   if (ws && (ws.readyState===0 || ws.readyState===1)) return;
   clearTimeout(reconnectTimer);
@@ -262,7 +275,8 @@ function ensureWs(){
   ws.binaryType='arraybuffer';
   ws.onopen = () => {
     $('dot').classList.add('on');
-    if (cur && !pending) wsSend({t:'join', name:myName, channel:cur.name, password:cur.pw, token});
+    if (adminKey) ws.send(JSON.stringify({t:'admin', key:adminKey}));
+    if (cur && !pending) ws.send(JSON.stringify(joinMsg(cur)));
     sendQueue.splice(0).forEach(m=>ws.send(m));
   };
   ws.onclose = () => {
@@ -283,14 +297,22 @@ function onMsg(ev){
   switch(m.t){
     case 'joined': {
       if (!pending && !cur){ wsSend({t:'leave'}); return; } // vartotojas atšaukė
-      const pw = pending ? pending.pw : (cur && cur.pw);
-      cur = { name:m.channel, pw, owner:m.owner, ticket:m.ticket };
-      upsertSaved({ name:m.channel, pw, owner:m.owner, last:Date.now() });
+      const prev = findSaved(m.channel) || {};
+      const src = pending || cur || {};
+      const pw = src.pw ?? prev.pw ?? null;
+      const viaAdmin = !!src.viaAdmin;
+      cur = { name:m.channel, pw, viaAdmin, owner:m.owner, ticket:m.ticket };
+      me.owner = m.owner; me.admin = m.admin;
+      upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, last:Date.now() });
       if (pending){ closeModal(); }
       enterChannelUI(m.history);
       break;
     }
     case 'error':
+      if (m.code==='badadmin' || m.code==='noadmin'){
+        adminKey=''; store.del('racija_admin');
+        if (!pending) { toast(m.msg); break; }
+      }
       if (pending){ const e=$('mErr'); if(e) e.textContent=m.msg; const b=$('mOk'); if(b) b.disabled=false; }
       else if (m.code==='badpass' || m.code==='notfound'){
         // pvz. pakeistas slaptažodis ar ištrintas kanalas
@@ -298,7 +320,20 @@ function onMsg(ev){
         toast(m.code==='badpass' ? `#${n}: slaptažodis pasikeitė` : `#${n}: kanalas nebeegzistuoja`);
       } else toast(m.msg);
       break;
-    case 'presence': talkerName=m.talker; renderUsers(m.users); updateStatus(); break;
+    case 'presence':
+      talkerName=m.talker; me=m.me;
+      if (cur && cur.owner!==m.me.owner){ cur.owner=m.me.owner; upsertSaved({name:cur.name, owner:cur.owner}); renderChSub(); }
+      renderUsers(m.users); updateStatus(); break;
+    case 'toast': toast(m.msg); break;
+    case 'adminOk':
+      if (pending && pending.adminAuth){ adminKey=pending.key; store.set('racija_admin',adminKey); pending=null; wsSend({t:'adminList'}); }
+      break;
+    case 'adminList': renderAdmin(m.channels); break;
+    case 'adminDone':
+      toast(m.msg);
+      if (m.action==='adminDelete'){ saved=saved.filter(c=>c.name!==m.channel); saveList(); renderList(); }
+      if (m.action==='adminPassword' && pending && pending.pwFor===m.channel){ const s=findSaved(m.channel); if(s){ s.pw=pending.pw; saveList(); } }
+      pending=null; renderAdmin(m.channels); break;
     case 'granted': if ($('ptt').classList.contains('down')){ talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else wsSend({t:'stop'}); break;
     case 'busy': vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); $('ptt').classList.remove('down'); break;
     case 'start': rxFrom=m.from; beep(660); vib(20); updateStatus(); break;
@@ -346,7 +381,7 @@ function renderList(){
   ul.innerHTML = saved.map(c=>`
     <li data-n="${esc(c.name)}">
       <div class="av">${esc(c.name[0].toUpperCase())}</div>
-      <div class="nm">#${esc(c.name)}<small>${c.owner?'👑 Tu esi kūrėjas':'🔒 Narys'}</small></div>
+      <div class="nm">#${esc(c.name)}<small>${c.viaAdmin?'🛡️ Administratorius':c.owner?'👑 Tu esi kūrėjas':'🔒 Narys'}</small></div>
       <button class="x" data-rm="${esc(c.name)}" aria-label="Pašalinti">✕</button>
     </li>`).join('');
 }
@@ -355,11 +390,81 @@ $('chList').addEventListener('click', async e=>{
   if (rm){ forgetModal(rm.dataset.rm); return; }
   const li=e.target.closest('li[data-n]'); if(!li) return;
   const c=findSaved(li.dataset.n); if(!c) return;
+  if (c.viaAdmin && !adminKey){ toast('Reikia administratoriaus rakto'); adminLogin(); return; }
   if (!(await audioOk())) return;
   openModal(`<h2>Jungiamasi prie #${esc(c.name)}…</h2><div class="err" id="mErr"></div><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
-  pending={pw:c.pw}; wantOpen=true;
-  wsSend({t:'join', name:myName, channel:c.name, password:c.pw, token});
+  pending={pw:c.pw, viaAdmin:c.viaAdmin}; wantOpen=true;
+  wsSend(joinMsg(c));
 });
+
+// ---------- administratorius ----------
+$('adminBtn').onclick = () => adminKey ? openAdmin() : adminLogin();
+function adminLogin(){
+  openModal(`<h2>🛡️ Administratorius</h2>
+    <div class="field"><label>Administratoriaus raktas (ADMIN_KEY)</label><input id="mKey" type="password" autocomplete="off"></div>
+    <button class="btn" id="mOk">Prisijungti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
+    <div class="err" id="mErr"></div>`);
+  $('mOk').onclick = () => {
+    const k=$('mKey').value; if(!k) return;
+    $('mOk').disabled=true; pending={adminAuth:true, key:k}; wantOpen=true;
+    wsSend({t:'admin', key:k});
+  };
+}
+function openAdmin(){
+  openModal(`<h2>🛡️ Visi kanalai</h2><div class="muted">Kraunama…</div>`);
+  wantOpen=true; wsSend({t:'admin', key:adminKey}); wsSend({t:'adminList'});
+}
+let adminChannels=[];
+function renderAdmin(list){
+  adminChannels=list;
+  if ($('modal').classList.contains('hidden') && !pending) openModal('');
+  const fmt = ts => new Date(ts).toLocaleDateString('lt-LT');
+  $('modalBox').innerHTML = `<h2>🛡️ Visi kanalai (${list.length})</h2>
+    ${list.length ? list.map(c=>`
+      <div class="adRow" data-n="${esc(c.name)}">
+        <div class="adTop"><b>#${esc(c.name)}</b>${c.online?`<span class="on">● ${c.online}</span>`:''}</div>
+        <div class="muted adMeta">Sukurtas ${fmt(c.created)} · ${c.msgs} įr. · ${c.owners} kūr.</div>
+        <div class="adBtns">
+          <button class="btn" data-a="enter">Įeiti</button>
+          <button class="btn alt" data-a="pw">🔑</button>
+          <button class="btn alt" data-a="own" title="Nuimti kūrėjus">👑✕</button>
+          <button class="btn danger" data-a="del">🗑️</button>
+        </div>
+      </div>`).join('') : '<p class="muted">Kanalų dar nėra.</p>'}
+    <button class="btn alt" id="mRefresh">Atnaujinti</button>
+    <button class="btn danger" id="mAdminOut">Išeiti iš administratoriaus režimo</button>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`;
+  $('mRefresh').onclick = () => wsSend({t:'adminList'});
+  $('mAdminOut').onclick = () => {
+    adminKey=''; store.del('racija_admin');
+    saved=saved.filter(c=>!c.viaAdmin || c.pw); saved.forEach(c=>c.viaAdmin=false); saveList();
+    closeModal(); renderList(); if (ws) ws.close(); toast('Administratoriaus režimas išjungtas');
+  };
+  $('modalBox').querySelectorAll('.adRow').forEach(row=>{
+    const n=row.dataset.n;
+    row.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+      const a=b.dataset.a;
+      if (a==='enter'){
+        if (!(await audioOk())) return;
+        pending={viaAdmin:true}; wsSend({t:'adminJoin', name:myName, channel:n, token});
+      } else if (a==='pw'){
+        openModal(`<h2>#${esc(n)}: naujas slaptažodis</h2>
+          <div class="field"><label>Bent 4 simboliai</label><input id="mPw" maxlength="64"></div>
+          <button class="btn" id="mOk">Išsaugoti</button><button class="btn alt" id="mBack">Atgal</button><div class="err" id="mErr"></div>`);
+        $('mBack').onclick=()=>renderAdmin(adminChannels);
+        $('mOk').onclick=()=>{ const p=$('mPw').value; if(p.length<4){$('mErr').textContent='Per trumpas';return;}
+          pending={pwFor:n, pw:p}; wsSend({t:'adminPassword', channel:n, password:p}); };
+      } else {
+        const del = a==='del';
+        openModal(`<h2>${del?`Ištrinti #${esc(n)}?`:`Nuimti kūrėjus #${esc(n)}?`}</h2>
+          <p class="muted">${del?'Kanalas ir visi įrašai bus ištrinti, nariai atjungti.':'Visi šio kanalo kūrėjai taps paprastais nariais. Paskui gali įeiti ir paskirti naują.'}</p>
+          <button class="btn danger" id="mOk">${del?'Ištrinti':'Nuimti'}</button><button class="btn alt" id="mBack">Atgal</button>`);
+        $('mBack').onclick=()=>renderAdmin(adminChannels);
+        $('mOk').onclick=()=>wsSend({t: del?'adminDelete':'adminResetOwners', channel:n});
+      }
+    });
+  });
+}
 
 async function audioOk(){
   try{ await initAudio(); return true; }
@@ -428,7 +533,7 @@ $('logoutBtn').onclick = () => {
     <button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
   const out = (all) => {
     wantOpen=false; cur=null; if (ws) ws.close();
-    myName=''; store.del('racija_name');
+    myName=''; store.del('racija_name'); adminKey=''; store.del('racija_admin');
     if (all){ saved=[]; saveList(); }
     closeModal(); $('nameIn').value=''; show('scrName');
   };
@@ -440,7 +545,7 @@ $('logoutBtn').onclick = () => {
 function enterChannelUI(history){
   show('scrChan');
   $('chName').textContent = '#'+cur.name;
-  $('chSub').textContent = (cur.owner?'👑 kūrėjas · ':'') + myName;
+  renderChSub();
   talkerName=null; rxFrom=null; updateStatus();
   const hb = (findSaved(cur.name)||{}).hiddenBefore||0;
   $('hist').innerHTML='';
@@ -450,7 +555,17 @@ function enterChannelUI(history){
 }
 $('backBtn').onclick = () => { if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
 
+function renderChSub(){
+  $('chSub').textContent = (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
+}
 $('inviteBtn').onclick = () => {
+  if (!cur.pw){
+    openModal(`<h2>Pakviesti į #${esc(cur.name)}</h2>
+      <p class="muted">Įėjai kaip administratorius, todėl slaptažodžio nežinai. Nustatyk naują, ir galėsi kviesti narius. Seni kvietimai nebegalios.</p>
+      <button class="btn" id="mOk">Nustatyti slaptažodį</button><button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+    $('mOk').onclick = () => { $('menuBtn').click(); $('miPw').click(); };
+    return;
+  }
   const link = `${location.origin}/?c=${encodeURIComponent(cur.name)}&k=${encodeURIComponent(cur.pw)}`;
   let qrSvg='';
   try{ const q=qrcode(0,'M'); q.addData(link); q.make(); qrSvg=q.createSvgTag({cellSize:5,margin:2,scalable:true}); }catch{}
@@ -545,9 +660,25 @@ function updateStatus(){
   else st.textContent='Tylu';
 }
 function renderUsers(list){
+  lastUsers=list;
   $('cnt').textContent=list.length;
-  $('users').innerHTML=list.map(u=>`<span class="chip${u===talkerName?' talk':''}">${esc(u)}${u===myName?' (tu)':''}</span>`).join('');
+  const can = me.owner;
+  $('users').innerHTML=list.map(u=>{
+    const mine=u.id===me.id;
+    return `<span class="chip${u.name===talkerName?' talk':''}${u.owner?' own':''}${can&&!mine?' tap':''}" data-id="${u.id}">${esc(u.name)}${mine?' (tu)':''}</span>`;
+  }).join('');
 }
+$('users').addEventListener('click', e=>{
+  const chip=e.target.closest('.chip.tap'); if(!chip) return;
+  const u=lastUsers.find(x=>x.id===Number(chip.dataset.id)); if(!u) return;
+  openModal(`<h2>${esc(u.name)}</h2>
+    <p class="muted">${u.owner?'Šis narys yra kanalo kūrėjas.':'Paprastas narys.'}</p>
+    ${u.owner
+      ? '<button class="btn danger" id="mOk">Nuimti kūrėjo teises</button>'
+      : '<button class="btn" id="mOk">👑 Paskirti kūrėju</button>'}
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+  $('mOk').onclick = () => { wsSend({t: u.owner?'revoke':'grant', target:u.id}); closeModal(); };
+});
 function renderHistEmpty(){
   if (!$('hist').querySelector('li:not(.none)')) $('hist').innerHTML='<li class="none">Dar nėra žinučių</li>';
 }
