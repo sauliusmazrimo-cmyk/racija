@@ -331,9 +331,9 @@ wss.on('connection', (ws, req) => {
       case 'cmd': {
         if (!ch) return;
         const now = Date.now();
-        if (now - (ws.lastCmd || 0) < 800) return; // apsauga nuo dvigubo paspaudimo
-        ws.lastCmd = now;
         const text = String(m.text || '').trim().slice(0, 40) || 'Komanda';
+        if (now - (ws.lastCmd || 0) < 800 && ws.lastCmdText === text) return; // tos pačios komandos dvigubas paspaudimas
+        ws.lastCmd = now; ws.lastCmdText = text;
         const alarm = !!m.alarm;
         const c = live.get(ws.chan);
         // STOP nutraukia bet kurį tuo metu kalbantį
