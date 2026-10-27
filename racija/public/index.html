@@ -843,12 +843,37 @@ function addHist(i){
   $('hist').prepend(li);
   while ($('hist').children.length>50) $('hist').lastChild.remove();
 }
-function playHist(id, li){
+// laukiam naujo bilieto po persijungimo (iki 4 s)
+function freshTicket(old){
+  if (ws && ws.readyState===1 && cur) wsSend(joinMsg(cur)); else ensureWs();
+  return new Promise(res=>{ const t0=Date.now(); const iv=setInterval(()=>{
+    if (cur && cur.ticket && cur.ticket!==old){ clearInterval(iv); res(true); }
+    else if (Date.now()-t0>4000){ clearInterval(iv); res(false); } }, 150); });
+}
+const AUDIO_ERR = {
+  deleted: 'Įrašas ištrintas (senesnis nei 48 val. arba išvalyta istorija)',
+  file: 'Įrašo failas nerastas serveryje',
+  decrypt: 'Įrašo failas pažeistas',
+  ticket: 'Ryšys atsinaujino – bandyk dar kartą'
+};
+async function playHist(id, li, retried){
   if (currentAudio){ currentAudio.pause(); document.querySelectorAll('#hist li.playing').forEach(x=>x.classList.remove('playing')); }
-  currentAudio=new Audio(`/audio/${id}?k=${cur.ticket}`);
+  if (!cur) return;
   li.classList.add('playing');
-  currentAudio.onended=currentAudio.onpause=()=>li.classList.remove('playing');
-  currentAudio.play().catch(()=>{ li.classList.remove('playing'); toast('Įrašas nebeprieinamas'); });
+  const done = () => li.classList.remove('playing');
+  let r;
+  try{ r = await fetch(`/audio/${id}?k=${cur.ticket}`, {cache:'no-store'}); }
+  catch{ done(); toast('Nėra ryšio su serveriu'); return; }
+  if (r.status===404){
+    const why = r.headers.get('X-Reason') || 'deleted';
+    if (why==='ticket' && !retried){ const old=cur.ticket; if (await freshTicket(old)) return playHist(id, li, true); }
+    done(); toast(AUDIO_ERR[why] || 'Įrašas nebeprieinamas'); return;
+  }
+  if (!r.ok){ done(); toast('Serverio klaida ('+r.status+')'); return; }
+  const url = URL.createObjectURL(await r.blob());
+  currentAudio = new Audio(url);
+  currentAudio.onended = currentAudio.onpause = () => { done(); URL.revokeObjectURL(url); };
+  currentAudio.play().catch(e=>{ done(); toast('Nepavyko paleisti garso: '+(e && e.name || '')); });
 }
 
 async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') await navigator.wakeLock.request('screen'); }catch{} }

@@ -136,7 +136,9 @@ function muToWav(mu) {
 
 // ---------- gyvi kanalai ----------
 const live = new Map();
-const tickets = new Map();
+const tickets = new Map(); // bilietas -> { chan, until }
+const TICKET_GRACE_MS = 2 * 60 * 1000;
+setInterval(() => { const now = Date.now(); for (const [k, t] of tickets) if (t.until < now) tickets.delete(k); }, 60 * 1000);
 let connSeq = 0;
 function rt(name) {
   if (!live.has(name)) live.set(name, { clients: new Set(), talker: null, current: null, timer: null });
@@ -204,7 +206,7 @@ function leave(ws) {
   const name = ws.chan;
   const c = live.get(name);
   if (c) c.clients.delete(ws);
-  if (ws.ticket) tickets.delete(ws.ticket);
+  if (ws.ticket && tickets.has(ws.ticket)) tickets.get(ws.ticket).until = Date.now() + TICKET_GRACE_MS;
   ws.chan = null; ws.ticket = null;
   presence(name);
 }
@@ -222,7 +224,7 @@ function attach(ws, name) {
   uniqueName(ws, name);
   ws.chan = name;
   ws.ticket = crypto.randomBytes(16).toString('hex');
-  tickets.set(ws.ticket, name);
+  tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
   send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, ticket: ws.ticket, history: db.channels[name].history });
   presence(name);
@@ -434,20 +436,21 @@ setInterval(() => {
 }, 30000);
 
 app.get('/audio/:id', (req, res) => {
-  const name = tickets.get(String(req.query.k || ''));
-  const ch = name && db.channels[name];
   const id = Number(req.params.id);
-  if (!ch || !ch.history.some(h => h.id === id)) return res.status(404).send('Nerasta');
+  const fail = (reason) => { console.warn(`įrašas ${id}: ${reason}`); res.set('X-Reason', reason); return res.status(404).send('Nerasta'); };
+  const t = tickets.get(String(req.query.k || ''));
+  if (!t || t.until < Date.now()) return fail('ticket');
+  const ch = db.channels[t.chan];
+  if (!ch || !ch.history.some(h => h.id === id)) return fail('deleted');
   fs.readFile(audioFile(id), (e, data) => {
-    if (e) return res.status(404).send('Nerasta');
-    try { data = decAudio(data); } catch { return res.status(404).send('Nerasta'); }
+    if (e) return fail('file');
+    try { data = decAudio(data); } catch { return fail('decrypt'); }
     res.set('Content-Type', 'audio/wav');
     res.set('Cache-Control', 'private, max-age=3600');
     res.send(muToWav(data));
   });
 });
 
-// Android programėlė (kompiliuoja GitHub Actions)
 app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
 
 app.get('/health', (_, res) => res.json({
