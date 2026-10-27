@@ -6,7 +6,11 @@
 <meta name="theme-color" content="#0b0f14">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Racija</title>
+<title>311 VoiceCH</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="apple-mobile-web-app-title" content="311 VoiceCH">
 <script src="/qrcode.js"></script>
 <style>
 :root{
@@ -124,7 +128,7 @@ input:focus{border-color:var(--accent)}
 
 <!-- 1. Vardas -->
 <section id="scrName" class="scr hidden">
-  <h1>Racij<span>a</span></h1>
+  <h1><span>311</span> VoiceCH</h1>
   <p class="muted">Kaip tave matys kiti kanalo nariai?</p>
   <div class="field">
     <label for="nameIn">Vardas</label>
@@ -137,7 +141,7 @@ input:focus{border-color:var(--accent)}
 <!-- 2. Kanalų sąrašas -->
 <section id="scrList" class="scr hidden">
   <div class="top">
-    <div class="grow"><div class="brand">Racij<span>a</span></div><div class="hello" id="hello"></div></div>
+    <div class="grow"><div class="brand"><span>311</span> VoiceCH</div><div class="hello" id="hello"></div></div>
     <button class="icon" id="adminBtn" aria-label="Administratorius">🛡️</button>
     <button class="ghost" id="logoutBtn">Atsijungti</button>
   </div>
@@ -587,8 +591,8 @@ $('inviteBtn').onclick = () => {
     ${navigator.share?'<button class="btn" id="mShare">Siųsti nuorodą (WhatsApp, Viber…)</button>':''}
     <button class="btn ${navigator.share?'alt':''}" id="mCopy">Kopijuoti nuorodą</button>
     <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
-  const text = `Prisijunk prie Racijos kanalo #${cur.name}: ${link}`;
-  if ($('mShare')) $('mShare').onclick = () => navigator.share({title:'Racija', text}).catch(()=>{});
+  const text = `Prisijunk prie 311 VoiceCH kanalo #${cur.name}: ${link}`;
+  if ($('mShare')) $('mShare').onclick = () => navigator.share({title:'311 VoiceCH', text}).catch(()=>{});
   $('mCopy').onclick = async () => {
     try{ await navigator.clipboard.writeText(link); }
     catch{ const t=document.createElement('textarea'); t.value=link; document.body.appendChild(t); t.select(); try{document.execCommand('copy')}catch{} t.remove(); }

@@ -1,4 +1,4 @@
-# Racija v0.3
+# 311 VoiceCH (v0.3)
 
 Push-to-talk racija: laikai mygtuką ir kalbi, kiti girdi realiu laiku.
 
