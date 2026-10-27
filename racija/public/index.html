@@ -313,6 +313,17 @@ function onMsg(ev){
         adminKey=''; store.del('racija_admin');
         if (!pending) { toast(m.msg); break; }
       }
+      if (pending && pending.fromSaved && m.code==='notfound'){
+        const c=pending.fromSaved; pending=null;
+        openModal(`<h2>#${esc(c.name)} nerastas</h2>
+          <p class="muted">Kanalas ištrintas arba dingo serveryje.${c.pw?' Gali jį sukurti iš naujo su tuo pačiu slaptažodžiu, tada seni kvietimai vėl veiks.':''}</p>
+          ${c.pw?'<button class="btn" id="mRe">Sukurti iš naujo</button>':''}
+          <button class="btn danger" id="mRm">Pašalinti iš sąrašo</button>
+          <button class="btn alt" onclick="closeModal()">Uždaryti</button><div class="err" id="mErr"></div>`);
+        if ($('mRe')) $('mRe').onclick=()=>{ $('mRe').disabled=true; pending={pw:c.pw}; wsSend({t:'create', name:myName, channel:c.name, password:c.pw, token}); };
+        $('mRm').onclick=()=>{ saved=saved.filter(x=>x.name!==c.name); saveList(); closeModal(); renderList(); };
+        break;
+      }
       if (pending){ const e=$('mErr'); if(e) e.textContent=m.msg; const b=$('mOk'); if(b) b.disabled=false; }
       else if (m.code==='badpass' || m.code==='notfound'){
         // pvz. pakeistas slaptažodis ar ištrintas kanalas
@@ -393,7 +404,7 @@ $('chList').addEventListener('click', async e=>{
   if (c.viaAdmin && !adminKey){ toast('Reikia administratoriaus rakto'); adminLogin(); return; }
   if (!(await audioOk())) return;
   openModal(`<h2>Jungiamasi prie #${esc(c.name)}…</h2><div class="err" id="mErr"></div><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
-  pending={pw:c.pw, viaAdmin:c.viaAdmin}; wantOpen=true;
+  pending={pw:c.pw, viaAdmin:c.viaAdmin, fromSaved:c}; wantOpen=true;
   wsSend(joinMsg(c));
 });
 
