@@ -41,7 +41,40 @@ function flushDb() {
   clearTimeout(saveTimer);
   try { fs.writeFileSync(DB_FILE + '.tmp', JSON.stringify(db)); fs.renameSync(DB_FILE + '.tmp', DB_FILE); } catch (e) { console.error(e); }
 }
+process.on('uncaughtException', (e) => console.error('Nepagauta klaida:', e));
+process.on('unhandledRejection', (e) => console.error('Nepagautas pažadas:', e));
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { flushDb(); process.exit(0); });
+// įrašų šifravimas diske (AES-256-GCM); raktas iš AUDIO_KEY arba ADMIN_KEY
+const KEY_SRC = process.env.AUDIO_KEY || ADMIN_KEY;
+const AUDIO_KEY = KEY_SRC ? crypto.createHash('sha256').update('vc-audio:' + KEY_SRC).digest() : null;
+function encAudio(buf) {
+  if (!AUDIO_KEY) return buf;
+  const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', AUDIO_KEY, iv);
+  const e = Buffer.concat([c.update(buf), c.final()]);
+  return Buffer.concat([Buffer.from('VC1'), iv, c.getAuthTag(), e]);
+}
+function decAudio(buf) {
+  if (buf.subarray(0, 3).toString() !== 'VC1') return buf;
+  if (!AUDIO_KEY) throw new Error('nėra rakto');
+  const d = crypto.createDecipheriv('aes-256-gcm', AUDIO_KEY, buf.subarray(3, 15));
+  d.setAuthTag(buf.subarray(15, 31));
+  return Buffer.concat([d.update(buf.subarray(31)), d.final()]);
+}
+
+// neteisingų bandymų ribojimas pagal IP (slaptažodžiai ir admin raktas)
+const AUTH_MAX = 6, AUTH_WINDOW = 10 * 60 * 1000, AUTH_BLOCK = 15 * 60 * 1000;
+const authFails = new Map();
+const ipBlocked = (ip) => { const a = authFails.get(ip); return !!a && a.until > Date.now(); };
+function noteFail(ip) {
+  const now = Date.now();
+  let a = authFails.get(ip);
+  if (!a || now - a.first > AUTH_WINDOW) a = { n: 0, first: now, until: 0 };
+  if (++a.n >= AUTH_MAX) a.until = now + AUTH_BLOCK;
+  authFails.set(ip, a);
+}
+setInterval(() => { const now = Date.now(); for (const [ip, a] of authFails) if (a.until < now && now - a.first > AUTH_WINDOW) authFails.delete(ip); }, 60 * 1000);
+const MIN_PW = 6;
+
 const audioFile = (id) => path.join(AUDIO_DIR, `${id}.ulaw`);
 const rmAudio = (id) => fs.unlink(audioFile(id), () => {});
 
@@ -113,9 +146,21 @@ const isOwner = (w, ch) => !!ch && ch.owners.includes(w.tokenHash);
 const canManage = (w) => !!w.chan && (w.isAdmin || isOwner(w, db.channels[w.chan]));
 
 const app = express();
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000',
+    'Permissions-Policy': 'microphone=(self), camera=(), geolocation=()'
+  });
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 256 * 1024 });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 32 * 1024 });
+wss.on('error', (e) => console.error('wss klaida:', e.message));
 
 function send(ws, obj) { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 const err = (ws, code, msg) => send(ws, { t: 'error', code, msg });
@@ -144,7 +189,7 @@ function endTalk(ws, forced = false) {
   if (ch && data.length >= MIN_BYTES) {
     item = { id: cur.id, from: cur.from, ts: cur.ts, dur: +(data.length / RATE).toFixed(1) };
     if (cur.cmd) item.voiceCmd = cur.cmd;
-    fs.writeFile(audioFile(item.id), data, () => {});
+    fs.writeFile(audioFile(item.id), encAudio(data), () => {});
     ch.history.push(item);
     while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
     saveDb();
@@ -164,8 +209,17 @@ function leave(ws) {
   presence(name);
 }
 
+function uniqueName(ws, name) {
+  const c = live.get(name); if (!c) return;
+  const taken = new Set([...c.clients].filter(w => w !== ws).map(w => w.user.toLowerCase()));
+  if (!taken.has(ws.user.toLowerCase())) return;
+  let i = 2; while (taken.has(`${ws.user} (${i})`.toLowerCase())) i++;
+  ws.user = `${ws.user} (${i})`;
+}
+
 function attach(ws, name) {
   leave(ws);
+  uniqueName(ws, name);
   ws.chan = name;
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, name);
@@ -186,6 +240,7 @@ function deleteChannel(name) {
 }
 
 function failAuth(ws, code, msg) {
+  noteFail(ws.ip);
   ws.fails = (ws.fails || 0) + 1;
   setTimeout(() => {
     err(ws, code, msg);
@@ -208,15 +263,21 @@ function adminList() {
   })).sort((a, b) => b.online - a.online || a.name.localeCompare(b.name));
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.id = ++connSeq;
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+  ws.ip = req.headers['x-real-ip'] || xff[xff.length - 1] || req.socket.remoteAddress;
   ws.isAlive = true;
+  ws.on('error', () => { try { ws.terminate(); } catch {} }); // netinkamas kadras neturi numušti serverio
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
       const c = ws.chan && live.get(ws.chan);
       if (!c || c.talker !== ws) return;
+      if (data.length > 16384) return;                       // per didelis kadras
+      c.current.bytes = (c.current.bytes || 0) + data.length;
+      if (c.current.bytes > RATE * (MAX_TALK_MS / 1000 + 5)) return endTalk(ws, true); // daugiau nei 65 s garso
       c.current.chunks.push(Buffer.from(data));
       for (const w of c.clients) if (w !== ws && w.readyState === 1) w.send(data, { binary: true });
       return;
@@ -229,7 +290,7 @@ wss.on('connection', (ws) => {
       case 'create': {
         const name = normChannel(m.channel);
         if (!name) return err(ws, 'badname', 'Pavadinimas: 2–32 raidės, skaičiai, - arba _');
-        if (String(m.password || '').length < 4) return err(ws, 'shortpass', 'Slaptažodis turi būti bent 4 simbolių');
+        if (String(m.password || '').length < MIN_PW) return err(ws, 'shortpass', `Slaptažodis turi būti bent ${MIN_PW} simbolių`);
         if (db.channels[name]) return err(ws, 'exists', 'Toks kanalas jau yra. Pasirink kitą pavadinimą arba prisijunk.');
         setUser(ws, m);
         db.channels[name] = { owners: [ws.tokenHash], created: Date.now(), history: [] };
@@ -238,6 +299,7 @@ wss.on('connection', (ws) => {
         return attach(ws, name);
       }
       case 'join': {
+        if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
         const name = normChannel(m.channel);
         const c = name && db.channels[name];
         if (!c) return failAuth(ws, 'notfound', 'Kanalas nerastas');
@@ -303,7 +365,7 @@ wss.on('connection', (ws) => {
       case 'password': {
         if (!ch) return;
         if (!canManage(ws)) return err(ws, 'notowner', 'Slaptažodį keisti gali tik kūrėjas');
-        if (String(m.password || '').length < 4) return err(ws, 'shortpass', 'Slaptažodis turi būti bent 4 simbolių');
+        if (String(m.password || '').length < MIN_PW) return err(ws, 'shortpass', `Slaptažodis turi būti bent ${MIN_PW} simbolių`);
         setPw(ch, m.password);
         saveDb();
         return send(ws, { t: 'passwordChanged' });
@@ -323,6 +385,7 @@ wss.on('connection', (ws) => {
 
       // ----- administratorius -----
       case 'admin':
+        if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
         if (!ADMIN_KEY) return err(ws, 'noadmin', 'Serveryje nenustatytas ADMIN_KEY');
         if (!checkAdmin(m.key || '')) return failAuth(ws, 'badadmin', 'Neteisingas administratoriaus raktas');
         ws.fails = 0; ws.isAdmin = true;
@@ -345,7 +408,7 @@ wss.on('connection', (ws) => {
         if (!c) return err(ws, 'notfound', 'Kanalas nerastas');
         let msg;
         if (m.t === 'adminPassword') {
-          if (String(m.password || '').length < 4) return err(ws, 'shortpass', 'Slaptažodis turi būti bent 4 simbolių');
+          if (String(m.password || '').length < MIN_PW) return err(ws, 'shortpass', `Slaptažodis turi būti bent ${MIN_PW} simbolių`);
           setPw(c, m.password); msg = `#${name}: slaptažodis pakeistas`;
         } else if (m.t === 'adminResetOwners') {
           c.owners = []; msg = `#${name}: kūrėjų teisės nuimtos`; presence(name);
@@ -376,6 +439,7 @@ app.get('/audio/:id', (req, res) => {
   if (!ch || !ch.history.some(h => h.id === id)) return res.status(404).send('Nerasta');
   fs.readFile(audioFile(id), (e, data) => {
     if (e) return res.status(404).send('Nerasta');
+    try { data = decAudio(data); } catch { return res.status(404).send('Nerasta'); }
     res.set('Content-Type', 'audio/wav');
     res.set('Cache-Control', 'private, max-age=3600');
     res.send(muToWav(data));
@@ -386,8 +450,8 @@ app.get('/audio/:id', (req, res) => {
 app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.4', channels: Object.keys(db.channels).length, clients: wss.clients.size,
-  dataDir: DATA_DIR, persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000
+  ok: true, version: '0.5', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
 }));
 
-server.listen(PORT, () => console.log(`311 VoiceCH v0.4: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.5: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
