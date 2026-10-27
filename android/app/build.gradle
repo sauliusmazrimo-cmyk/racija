@@ -1,0 +1,34 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'lt.voicech311'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'lt.voicech311'
+        minSdk 26
+        targetSdk 34
+        versionCode Integer.parseInt(System.getenv('GITHUB_RUN_NUMBER') ?: '1')
+        versionName "1.0." + (System.getenv('GITHUB_RUN_NUMBER') ?: '0')
+        buildConfigField 'String', 'BASE_URL', '"https://racija-production.up.railway.app/"'
+    }
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        // pastovus raktas, kad atnaujinimai įsidiegtų ant senos versijos
+        fixed {
+            storeFile file('voicech311.keystore')
+            storePassword 'voicech311'
+            keyAlias 'voicech311'
+            keyPassword 'voicech311'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.fixed }
+        release { signingConfig signingConfigs.fixed; minifyEnabled false }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

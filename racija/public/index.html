@@ -120,6 +120,10 @@ input:focus{border-color:var(--accent)}
 .adMeta{font-size:12px;margin:2px 0 10px}
 .adBtns{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
 .adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
+.apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
+  background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
+.apkBanner b{display:block;font-size:15px}
+.apkBanner small{display:block;font-size:12px;color:var(--muted)}
 #toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#243040;
   color:var(--text);padding:12px 18px;border-radius:12px;font-size:14px;z-index:20;transition:opacity .2s;pointer-events:none}
 </style>
@@ -718,6 +722,41 @@ function playHist(id, li){
 
 async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') await navigator.wakeLock.request('screen'); }catch{} }
 document.addEventListener('visibilitychange', ()=>{ if (cur && document.visibilityState==='visible'){ keepAwake(); ensureWs(); } });
+
+// ---------- Android programėlė ----------
+const NATIVE = !!(window.Native311 && Native311.isNative && Native311.isNative());
+const scrVisible = id => !$(id).classList.contains('hidden');
+const modalOpen = () => !$('modal').classList.contains('hidden');
+if (NATIVE){
+  // Bluetooth / ausinių mygtukas
+  window.nativePtt = mode => {
+    if (!scrVisible('scrChan') || !cur) return;
+    const fake = {preventDefault(){}};
+    if (mode==='down') pttDown(fake); else pttUp(fake);
+  };
+  window.nativeBack = () => { if (modalOpen()){ closeModal(); return true; } return false; };
+  window.nativeInvite = (c,k) => {
+    if (!myName){ inviteData={c,k}; show('scrName'); return; }
+    showList(); inviteModal({c,k});
+  };
+  // būsena pranešime
+  let lastNs='';
+  setInterval(()=>{
+    let s='Neprisijungta prie kanalo';
+    if (cur && scrVisible('scrChan')){
+      const online = ws && ws.readyState===1;
+      s = `#${cur.name} · ` + (!online ? 'jungiamasi…' : talking ? 'tu kalbi' : (talkerName && talkerName!==myName) ? `kalba ${talkerName}` : `prisijungę ${$('cnt').textContent}`);
+    }
+    if (s!==lastNs){ lastNs=s; try{ Native311.setStatus(s) }catch{} }
+    if (ctx && ctx.state!=='running') ctx.resume().catch(()=>{});
+  }, 1000);
+} else if (/Android/i.test(navigator.userAgent)) {
+  // pasiūlom parsisiųsti programėlę
+  const b=document.createElement('a');
+  b.href='/apk'; b.className='apkBanner';
+  b.innerHTML='📲 <span><b>Android programėlė</b><small>Veikia fone ir su Bluetooth mygtuku</small></span>';
+  $('scrList').insertBefore(b, $('chList'));
+}
 
 // ---------- startas ----------
 let inviteData=null;

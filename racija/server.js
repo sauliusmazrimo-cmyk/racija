@@ -360,6 +360,9 @@ app.get('/audio/:id', (req, res) => {
   });
 });
 
+// Android programėlė (kompiliuoja GitHub Actions)
+app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
+
 app.get('/health', (_, res) => res.json({
   ok: true, version: '0.3', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   dataDir: DATA_DIR, persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000

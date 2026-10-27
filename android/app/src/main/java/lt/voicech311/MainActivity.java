@@ -1,0 +1,204 @@
+package lt.voicech311;
+
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.util.AttributeSet;
+import android.view.View;
+import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class MainActivity extends Activity {
+
+    static MainActivity instance;
+    private AlwaysVisibleWebView web;
+    private PermissionRequest pendingWebPermission;
+    private static final int REQ_PERMS = 31;
+
+    /** WebView, kuris nesužino, kad ekranas užrakintas: puslapis neužmigdomas ir neribojamas. */
+    public static class AlwaysVisibleWebView extends WebView {
+        public AlwaysVisibleWebView(Context c) { super(c); }
+        public AlwaysVisibleWebView(Context c, AttributeSet a) { super(c, a); }
+        @Override protected void onWindowVisibilityChanged(int visibility) {
+            super.onWindowVisibilityChanged(View.VISIBLE);
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        instance = this;
+
+        web = new AlwaysVisibleWebView(this);
+        web.setBackgroundColor(0xFF0B0F14);
+        setContentView(web);
+
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setUserAgentString(s.getUserAgentString() + " VoiceCH311Android/" + BuildConfig.VERSION_NAME);
+
+        web.addJavascriptInterface(new Bridge(), "Native311");
+
+        web.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
+                Uri u = req.getUrl();
+                if (baseHost().equals(u.getHost())) return false;
+                try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
+                return true;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest req, WebResourceError err) {
+                if (req.isForMainFrame()) showOffline();
+            }
+        });
+
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(() -> {
+                    if (hasMic()) request.grant(request.getResources());
+                    else { pendingWebPermission = request; requestPerms(); }
+                });
+            }
+        });
+
+        String url = BuildConfig.BASE_URL;
+        Uri link = getIntent() != null ? getIntent().getData() : null;
+        if (link != null && baseHost().equals(link.getHost())) url = link.toString();
+        web.loadUrl(url);
+
+        requestPerms();
+        if (hasMic()) startVoiceService();
+    }
+
+    private String baseHost() { return Uri.parse(BuildConfig.BASE_URL).getHost(); }
+
+    private boolean hasMic() {
+        return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestPerms() {
+        List<String> need = new ArrayList<>();
+        if (!hasMic()) need.add(Manifest.permission.RECORD_AUDIO);
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
+        if (!need.isEmpty()) requestPermissions(need.toArray(new String[0]), REQ_PERMS);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (pendingWebPermission != null) {
+            if (hasMic()) pendingWebPermission.grant(pendingWebPermission.getResources());
+            else pendingWebPermission.deny();
+            pendingWebPermission = null;
+        }
+        if (hasMic()) startVoiceService();
+    }
+
+    private void startVoiceService() {
+        try {
+            Intent i = new Intent(this, VoiceService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
+        } catch (Exception ignored) {}
+        askBatteryOnce();
+    }
+
+    /** Vieną kartą paprašom neriboti baterijos, kad Android neužmigdytų programėlės. */
+    @SuppressLint("BatteryLife")
+    private void askBatteryOnce() {
+        SharedPreferences p = getSharedPreferences("app", MODE_PRIVATE);
+        if (p.getBoolean("askedBattery", false)) return;
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+            p.edit().putBoolean("askedBattery", true).apply();
+            try {
+                Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                i.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(i);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void showOffline() {
+        String html = "<html><body style='background:#0b0f14;color:#e6edf3;font-family:sans-serif;display:flex;"
+                + "flex-direction:column;align-items:center;justify-content:center;height:90vh;text-align:center'>"
+                + "<h2><span style='color:#ff8a1f'>311</span> VoiceCH</h2><p style='color:#7d8a99'>Nėra ryšio su serveriu</p>"
+                + "<button onclick=\"location.href='" + BuildConfig.BASE_URL + "'\" style='padding:14px 28px;border:0;"
+                + "border-radius:12px;background:#ff8a1f;font-size:17px;font-weight:700'>Bandyti dar kartą</button></body></html>";
+        web.loadDataWithBaseURL(null, html, "text/html", "utf-8", null);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        Uri u = intent.getData();
+        if (u != null && baseHost().equals(u.getHost()) && u.getQueryParameter("c") != null) {
+            String js = "window.nativeInvite&&nativeInvite(" + jsStr(u.getQueryParameter("c")) + ","
+                    + jsStr(u.getQueryParameter("k") == null ? "" : u.getQueryParameter("k")) + ")";
+            web.evaluateJavascript(js, null);
+        }
+    }
+
+    private static String jsStr(String s) {
+        return "'" + s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ") + "'";
+    }
+
+    @Override
+    public void onBackPressed() {
+        web.evaluateJavascript("window.nativeBack?nativeBack():false", v -> {
+            if (!"true".equals(v)) moveTaskToBack(true); // lieka veikti fone
+        });
+    }
+
+    // Svarbu: web.onPause() NEkviečiam, kad garsas ir ryšys veiktų užrakinus ekraną.
+
+    @Override
+    protected void onDestroy() {
+        instance = null;
+        stopService(new Intent(this, VoiceService.class));
+        if (web != null) { web.destroy(); }
+        super.onDestroy();
+    }
+
+    /** Kviečiama iš VoiceService (Bluetooth mygtukas): "down" / "up". */
+    static void ptt(String mode) {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativePtt&&nativePtt('" + mode + "')", null));
+    }
+
+    class Bridge {
+        @JavascriptInterface public boolean isNative() { return true; }
+        @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
+        @JavascriptInterface public void setStatus(String text) { VoiceService.updateStatus(text); }
+        @JavascriptInterface public void exitApp() {
+            runOnUiThread(() -> { stopService(new Intent(MainActivity.this, VoiceService.class)); finishAndRemoveTask(); });
+        }
+    }
+}
