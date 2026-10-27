@@ -83,6 +83,7 @@ public class VoiceService extends Service {
             wifiLock.acquire();
         }
         setupMediaSession();
+        resetAudioMode();
         NotificationChannel cc = new NotificationChannel(CH_CMD, "Greitos komandos (LoRa)", NotificationManager.IMPORTANCE_HIGH);
         cc.enableVibration(true);
         nm.createNotificationChannel(cc);
@@ -283,6 +284,21 @@ public class VoiceService extends Service {
         MainActivity.alarmDone();
     }
 
+    /** Grąžina įprastą garso režimą, kad garso mygtukai vėl valdytų medijos / skambučio garsumą. */
+    void resetAudioMode() {
+        try {
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            am.setMode(AudioManager.MODE_NORMAL);
+            am.setSpeakerphoneOn(false);
+            if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice();
+        } catch (Exception ignored) {}
+    }
+
+    static void audioIdle() {
+        VoiceService s = inst;
+        if (s != null) s.handler.post(s::resetAudioMode);
+    }
+
     static void updateStatus(String text) {
         if (text == null || text.equals(status)) return;
         status = text;
@@ -307,6 +323,7 @@ public class VoiceService extends Service {
         releaseTone();
         if (mesh != null) mesh.shutdown();
         if (session != null) session.release();
+        resetAudioMode();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
         super.onDestroy();

@@ -247,6 +247,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void alarmId(String text, String from, String id) {
             VoiceService.alarm(text, from); // dublikatai jau atmesti per markSeen
         }
+        @JavascriptInterface public void audioIdle() { VoiceService.audioIdle(); }
         /** true, jei id dar nematytas (ir dabar pažymėtas). */
         @JavascriptInterface public boolean markSeen(String id) { VoiceService s = VoiceService.inst; return s == null || s.markSeen(id); }
         @JavascriptInterface public boolean meshSend(String text, String id) { return VoiceService.meshSend(text, id); }

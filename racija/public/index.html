@@ -299,9 +299,20 @@ async function initAudio(){
       if (recBuf) recBuf.push(out); else ws.send(out);
     };
   }
-  if (!stream){
+}
+
+// Mikrofonas atidaromas TIK kalbant / įrašant. Nuolat atidarytas mikrofonas laiko telefoną
+// „pokalbio“ režime, ir garso mygtukai nustoja valdyti įprastą garsumą.
+let micIdle=null, micOpening=null;
+async function openMic(){
+  await initAudio();
+  clearTimeout(micIdle);
+  if (stream) return;
+  if (micOpening) return micOpening;
+  micOpening = (async()=>{
     // triukšme: be automatinio garsumo kėlimo (šūviai nesustiprinami) + ribotuvas smūginiams garsams
-    stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:!noisy}});
+    const s = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:!noisy}});
+    stream = s;
     micSrc = ctx.createMediaStreamSource(stream);
     if (noisy){
       micChain = ctx.createDynamicsCompressor();
@@ -312,15 +323,21 @@ async function initAudio(){
     } else {
       micChain = null; micSrc.connect(proc);
     }
-  }
+  })();
+  try{ await micOpening; } finally { micOpening=null; }
 }
-async function restartMic(){
+function closeMic(force){
+  clearTimeout(micIdle);
+  if (!force && (talking || recBuf || ptt.classList.contains('down'))) return;
   if (stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
   try{ micSrc && micSrc.disconnect(); }catch{}
   try{ micChain && micChain._out.disconnect(); }catch{}
   micSrc=null; micChain=null;
-  await initAudio();
+  if (window.Native311 && Native311.audioIdle) setTimeout(()=>{ try{ Native311.audioIdle(); }catch{} }, 300);
 }
+function closeMicSoon(ms=1200){ clearTimeout(micIdle); micIdle=setTimeout(()=>closeMic(false), ms); }
+async function restartMic(){ closeMic(true); }  // kitą kartą atsidarys su naujais nustatymais
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='hidden' && !talking && !recBuf) closeMic(true); });
 function encode(input){
   const ratio = ctx.sampleRate / RATE, out = [];
   while (dsPos < input.length){
@@ -752,17 +769,18 @@ function pttDown(e){
   if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
   ptt.classList.add('down');
   if (currentAudio) currentAudio.pause();
+  openMic().catch(()=>{ flash('Nepavyko įjungti mikrofono'); pttUp(); });
   wsSend({t:'start'});
 }
 function pttUp(e){
   if (e) e.preventDefault();
   if (!ptt.classList.contains('down')) return;
   ptt.classList.remove('down');
-  if (talking) stopTalk();
+  if (talking) stopTalk(); else closeMicSoon();
 }
 function stopTalk(silent){
   ptt.classList.remove('down');
-  setTimeout(()=>{ talking=false; wsSend({t:'stop'}); if(!silent) beep(520); updateStatus(); },120);
+  setTimeout(()=>{ talking=false; wsSend({t:'stop'}); if(!silent) beep(520); updateStatus(); closeMicSoon(); },120);
 }
 ptt.addEventListener('pointerdown', pttDown);
 ptt.addEventListener('pointerup', pttUp);
@@ -977,15 +995,15 @@ function cmdEditor(){
     let tm=null;
     const start = async e => {
       e.preventDefault();
-      if (!(await audioOk())) return;
       dsPos=0; recBuf=[]; rec.classList.add('on'); vib(30);
       tm=setTimeout(stop, 5000);
+      try{ await openMic(); }catch{ recBuf=null; rec.classList.remove('on'); toast('Nepavyko įjungti mikrofono'); }
     };
     const stop = () => {
       if (!recBuf) return;
       clearTimeout(tm); rec.classList.remove('on');
       setTimeout(()=>{ // paskutinis garso blokas
-        const parts=recBuf; recBuf=null;
+        const parts=recBuf; recBuf=null; closeMicSoon();
         const len=parts.reduce((a,p)=>a+p.length,0);
         if (len < RATE*0.4){ toast('Per trumpa – laikyk mygtuką kalbėdamas'); return; }
         const all=new Uint8Array(len); let o=0; parts.forEach(p=>{ all.set(p,o); o+=p.length; });
