@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#0b0f14">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Racija</title>
+<script src="/qrcode.js"></script>
 <style>
 :root{
-  --bg:#0b0f14; --panel:#121820; --line:#1f2833; --text:#e6edf3; --muted:#7d8a99;
+  --bg:#0b0f14; --panel:#121820; --panel2:#18202a; --line:#1f2833; --text:#e6edf3; --muted:#7d8a99;
   --accent:#ff8a1f; --accent2:#ffb347; --ok:#2ecc71; --busy:#e74c3c; --rx:#3fa9f5;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -17,37 +18,59 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom)}
 .hidden{display:none!important}
+button{font:inherit;cursor:pointer}
+.scr{flex:1;display:flex;flex-direction:column;max-width:520px;width:100%;margin:0 auto;min-height:0}
 
-/* prisijungimas */
-#login{flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px;max-width:420px;width:100%;margin:0 auto}
-#login h1{margin:0 0 8px;font-size:34px;letter-spacing:.5px}
-#login h1 span{color:var(--accent)}
-#login p{margin:0 0 10px;color:var(--muted)}
-label{font-size:13px;color:var(--muted)}
+label{font-size:13px;color:var(--muted);display:block;margin:0 0 6px}
 input{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);
   color:var(--text);font-size:17px;outline:none}
 input:focus{border-color:var(--accent)}
-.btn{padding:16px;border:0;border-radius:12px;background:var(--accent);color:#111;font-weight:700;font-size:17px}
-.err{color:var(--busy);font-size:14px;min-height:18px}
+.field{margin-bottom:14px}
+.btn{width:100%;padding:15px;border:0;border-radius:12px;background:var(--accent);color:#111;font-weight:700;font-size:16px}
+.btn.alt{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+.btn.danger{background:transparent;color:var(--busy);border:1px solid rgba(231,76,60,.5)}
+.btn + .btn{margin-top:10px}
+.err{color:var(--busy);font-size:14px;min-height:20px;margin-top:8px}
+.muted{color:var(--muted);font-size:14px}
+.ghost{background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:8px 12px;font-size:14px}
+.icon{width:40px;height:40px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--text);
+  display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
 
-/* pagrindinis */
-#app{flex:1;display:flex;flex-direction:column;max-width:520px;width:100%;margin:0 auto;min-height:0}
-header{display:flex;align-items:center;gap:10px;padding:14px 0}
+/* vardo ekranas */
+#scrName{justify-content:center}
+#scrName h1{margin:0 0 6px;font-size:36px}
+#scrName h1 span,.brand span{color:var(--accent)}
+#scrName p{margin:0 0 24px}
+
+/* kanalų sąrašas */
+.top{display:flex;align-items:center;gap:10px;padding:16px 0 12px}
+.top .grow{flex:1;min-width:0}
+.brand{font-weight:800;font-size:22px}
+.hello{color:var(--muted);font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#chList{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1}
+#chList li{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:var(--panel);
+  border:1px solid var(--line);margin-bottom:8px}
+#chList li .nm{flex:1;min-width:0;font-weight:700;font-size:17px;overflow:hidden;text-overflow:ellipsis}
+#chList li .nm small{display:block;font-weight:500;font-size:12px;color:var(--muted);margin-top:2px}
+#chList li .av{width:40px;height:40px;border-radius:12px;background:rgba(255,138,31,.15);color:var(--accent);
+  display:flex;align-items:center;justify-content:center;font-weight:800;flex:none}
+#chList li .x{background:none;border:0;color:var(--muted);font-size:18px;padding:6px}
+.emptyBox{text-align:center;padding:40px 10px;color:var(--muted)}
+.emptyBox b{display:block;color:var(--text);font-size:18px;margin-bottom:6px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 0 16px}
+.actions .btn + .btn{margin-top:0}
+
+/* kanalas */
 .dot{width:10px;height:10px;border-radius:50%;background:var(--busy);flex:none}
 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
-header .ch{font-weight:700;font-size:18px}
-header .me{color:var(--muted);font-size:14px}
-header .sp{flex:1}
-header button{background:none;border:1px solid var(--line);color:var(--muted);border-radius:10px;padding:8px 10px;font-size:13px}
-
-#status{height:56px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
-  display:flex;align-items:center;justify-content:center;font-weight:600;transition:.15s}
+.chTitle{font-weight:800;font-size:18px;display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+#status{height:52px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center;font-weight:600;transition:.15s;padding:0 10px;text-align:center}
 #status.rx{background:rgba(63,169,245,.15);border-color:var(--rx);color:var(--rx)}
 #status.tx{background:rgba(255,138,31,.15);border-color:var(--accent);color:var(--accent)}
 #status.busy{background:rgba(231,76,60,.15);border-color:var(--busy);color:var(--busy)}
-
-#pttWrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:240px}
-#ptt{width:min(62vw,240px);height:min(62vw,240px);border-radius:50%;border:0;
+#pttWrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:220px}
+#ptt{width:min(60vw,230px);height:min(60vw,230px);border-radius:50%;border:0;
   background:radial-gradient(circle at 35% 30%,var(--accent2),var(--accent) 60%,#c25d00);
   color:#1a1a1a;font-size:20px;font-weight:800;letter-spacing:1px;
   box-shadow:0 10px 40px rgba(255,138,31,.35),inset 0 -6px 0 rgba(0,0,0,.2);
@@ -55,62 +78,120 @@ header button{background:none;border:1px solid var(--line);color:var(--muted);bo
 #ptt.down{transform:scale(.94);box-shadow:0 0 0 14px rgba(255,138,31,.18),0 0 60px rgba(255,138,31,.6)}
 #ptt.locked{background:#2a3340;color:var(--muted);box-shadow:none}
 #ptt small{display:block;font-size:12px;font-weight:600;opacity:.7;margin-top:6px}
-
-.sec{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:10px 0 8px}
+.sec{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:10px 0 8px;display:flex;justify-content:space-between}
 #users{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:6px 10px;border-radius:20px;background:var(--panel);border:1px solid var(--line);font-size:13px}
 .chip.talk{border-color:var(--rx);color:var(--rx)}
-#hist{list-style:none;margin:0;padding:0 0 16px;overflow-y:auto;max-height:32vh}
+#hist{list-style:none;margin:0;padding:0 0 16px;overflow-y:auto;max-height:30vh}
 #hist li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;
   background:var(--panel);border:1px solid var(--line);margin-bottom:6px}
-#hist li .who{flex:1;font-weight:600}
-#hist li .t{color:var(--muted);font-size:13px}
-#hist li button{width:40px;height:40px;border-radius:50%;border:0;background:var(--line);color:var(--text);font-size:15px}
+#hist li .who{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hist li .t{color:var(--muted);font-size:13px;white-space:nowrap}
+#hist li button{width:40px;height:40px;border-radius:50%;border:0;background:var(--line);color:var(--text);font-size:15px;flex:none}
 #hist li.playing button{background:var(--rx);color:#000}
-.empty{color:var(--muted);font-size:14px;padding:6px 0}
+#hist .none{background:none;border:0;color:var(--muted);font-size:14px;padding:4px 0}
+
+/* modalas */
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-end;justify-content:center;z-index:10;
+  padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+#modal .box{width:100%;max-width:480px;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:20px;
+  max-height:90vh;overflow-y:auto;animation:up .18s ease-out}
+@keyframes up{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
+#modal h2{margin:0 0 16px;font-size:20px}
+.menuItem{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px;border-radius:12px;
+  background:var(--panel2);border:1px solid var(--line);color:var(--text);font-size:16px;margin-bottom:8px}
+.menuItem.red{color:var(--busy)}
+.menuItem small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.qr{background:#fff;border-radius:14px;padding:12px;width:220px;margin:0 auto 14px}
+.qr svg{display:block;width:100%;height:auto}
+.linkBox{background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:13px;
+  word-break:break-all;color:var(--muted);margin-bottom:12px}
+.cred{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:15px;margin-bottom:14px}
+.cred span{color:var(--muted)}
+#toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#243040;
+  color:var(--text);padding:12px 18px;border-radius:12px;font-size:14px;z-index:20;transition:opacity .2s;pointer-events:none}
 </style>
 </head>
 <body>
 
-<section id="login">
+<!-- 1. Vardas -->
+<section id="scrName" class="scr hidden">
   <h1>Racij<span>a</span></h1>
-  <p>Paspausk ir laikyk mygtuką, kad kalbėtum.</p>
-  <label for="name">Vardas</label>
-  <input id="name" autocomplete="name" placeholder="pvz. Saulius">
-  <label for="channel">Kanalas</label>
-  <input id="channel" placeholder="pvz. planavimas-1" value="bendras">
-  <button class="btn" id="joinBtn">Prisijungti</button>
-  <div class="err" id="err"></div>
+  <p class="muted">Kaip tave matys kiti kanalo nariai?</p>
+  <div class="field">
+    <label for="nameIn">Vardas</label>
+    <input id="nameIn" autocomplete="name" maxlength="32" placeholder="pvz. Saulius">
+  </div>
+  <button class="btn" id="nameBtn">Toliau</button>
+  <div class="err" id="nameErr"></div>
 </section>
 
-<section id="app" class="hidden">
-  <header>
-    <div class="dot" id="dot"></div>
-    <div><div class="ch" id="chName">#</div><div class="me" id="meName"></div></div>
-    <div class="sp"></div>
-    <button id="leaveBtn">Keisti</button>
-  </header>
+<!-- 2. Kanalų sąrašas -->
+<section id="scrList" class="scr hidden">
+  <div class="top">
+    <div class="grow"><div class="brand">Racij<span>a</span></div><div class="hello" id="hello"></div></div>
+    <button class="ghost" id="logoutBtn">Atsijungti</button>
+  </div>
+  <div class="sec"><span>Mano kanalai</span></div>
+  <ul id="chList"></ul>
+  <div class="actions">
+    <button class="btn" id="newChBtn">＋ Sukurti</button>
+    <button class="btn alt" id="joinChBtn">Prisijungti</button>
+  </div>
+</section>
 
-  <div id="status">Tylu</div>
-
-  <div id="pttWrap">
-    <button id="ptt">KALBĖTI<small>laikyk nuspaudęs</small></button>
+<!-- 3. Kanalas -->
+<section id="scrChan" class="scr hidden">
+  <div class="top">
+    <button class="icon" id="backBtn" aria-label="Atgal">←</button>
+    <div class="grow"><div class="chTitle"><span class="dot" id="dot"></span><span id="chName"></span></div>
+      <div class="hello" id="chSub"></div></div>
+    <button class="icon" id="inviteBtn" aria-label="Pakviesti">👥</button>
+    <button class="icon" id="menuBtn" aria-label="Meniu">⋯</button>
   </div>
 
-  <div class="sec">Prisijungę (<span id="cnt">0</span>)</div>
-  <div id="users"></div>
+  <div id="status">Tylu</div>
+  <div id="pttWrap"><button id="ptt">KALBĖTI<small>laikyk nuspaudęs</small></button></div>
 
-  <div class="sec">Istorija</div>
+  <div class="sec"><span>Prisijungę (<b id="cnt">0</b>)</span></div>
+  <div id="users"></div>
+  <div class="sec"><span>Istorija</span></div>
   <ul id="hist"></ul>
 </section>
+
+<div id="modal" class="hidden"><div class="box" id="modalBox"></div></div>
+<div id="toast" style="opacity:0"></div>
 
 <script>
 const RATE = 16000;
 const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const vib = p => { try{ navigator.vibrate && navigator.vibrate(p) }catch{} };
 const store = {
-  get(k){ try{ return localStorage.getItem(k) }catch{ return null } },
-  set(k,v){ try{ localStorage.setItem(k,v) }catch{} }
+  get(k,d=null){ try{ const v=localStorage.getItem(k); return v===null?d:v }catch{ return d } },
+  set(k,v){ try{ localStorage.setItem(k,v) }catch{} },
+  del(k){ try{ localStorage.removeItem(k) }catch{} }
 };
+
+// ---------- vietiniai duomenys ----------
+let myName = store.get('racija_name','');
+let token = store.get('racija_token');
+if (!token){ token = [...crypto.getRandomValues(new Uint8Array(16))].map(b=>b.toString(16).padStart(2,'0')).join(''); store.set('racija_token',token); }
+let saved = (()=>{ try{ return JSON.parse(store.get('racija_channels','[]'))||[] }catch{ return [] } })();
+const saveList = () => store.set('racija_channels', JSON.stringify(saved));
+const findSaved = n => saved.find(c=>c.name===n);
+function upsertSaved(obj){
+  const c = findSaved(obj.name);
+  if (c) Object.assign(c,obj); else saved.unshift({hiddenBefore:0, ...obj});
+  saveList();
+}
+
+// ---------- ekranai ----------
+function show(id){ ['scrName','scrList','scrChan'].forEach(s=>$(s).classList.toggle('hidden', s!==id)); }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.opacity=1; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.opacity=0,2000); }
+function openModal(html){ $('modalBox').innerHTML=html; $('modal').classList.remove('hidden'); const f=$('modalBox').querySelector('input'); if(f) setTimeout(()=>f.focus(),50); }
+function closeModal(){ $('modal').classList.add('hidden'); $('modalBox').innerHTML=''; pending=null; }
+$('modal').addEventListener('pointerdown', e=>{ if(e.target.id==='modal') closeModal(); });
 
 // ---------- mu-law ----------
 const MU = new Int16Array(256);
@@ -122,20 +203,16 @@ function linToMu(s){
   return ~(sign|(exp<<4)|mant)&0xff;
 }
 
-// ---------- būsena ----------
-let ws=null, me=null, chan=null, ctx=null, stream=null, proc=null, gainOut=null;
-let talking=false, waitGrant=false, rxFrom=null, talkerName=null, playHead=0, dsPos=0;
-let reconnectTimer=null, wakeLock=null, currentAudio=null;
-
 // ---------- garsas ----------
+let ctx=null, stream=null, gainOut=null, talking=false, playHead=0, dsPos=0;
 async function initAudio(){
   ctx = ctx || new (window.AudioContext||window.webkitAudioContext)();
   if (ctx.state==='suspended') await ctx.resume();
-  gainOut = gainOut || (()=>{ const g=ctx.createGain(); g.gain.value=1.4; g.connect(ctx.destination); return g })();
+  if (!gainOut){ gainOut=ctx.createGain(); gainOut.gain.value=1.4; gainOut.connect(ctx.destination); }
   if (!stream){
     stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     const src = ctx.createMediaStreamSource(stream);
-    proc = ctx.createScriptProcessor(4096,1,1);
+    const proc = ctx.createScriptProcessor(4096,1,1);
     const mute = ctx.createGain(); mute.gain.value=0;
     src.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
     proc.onaudioprocess = e => {
@@ -145,82 +222,296 @@ async function initAudio(){
     };
   }
 }
-
 function encode(input){
-  const ratio = ctx.sampleRate / RATE;
-  const out = [];
+  const ratio = ctx.sampleRate / RATE, out = [];
   while (dsPos < input.length){
-    const a = Math.floor(dsPos), b = Math.max(a+1, Math.min(input.length, Math.floor(dsPos+ratio)));
+    const a=Math.floor(dsPos), b=Math.max(a+1, Math.min(input.length, Math.floor(dsPos+ratio)));
     let sum=0; for(let i=a;i<b;i++) sum+=input[i];
-    let v = sum/(b-a); v = Math.max(-1,Math.min(1,v));
+    const v=Math.max(-1,Math.min(1,sum/(b-a)));
     out.push(linToMu(Math.round(v*32767)));
     dsPos += ratio;
   }
   dsPos -= input.length;
   return new Uint8Array(out);
 }
-
 function playChunk(bytes){
   if (!ctx) return;
-  const buf = ctx.createBuffer(1, bytes.length, RATE);
-  const d = buf.getChannelData(0);
-  for (let i=0;i<bytes.length;i++) d[i] = MU[bytes[i]]/32768;
-  const s = ctx.createBufferSource(); s.buffer=buf; s.connect(gainOut);
-  const now = ctx.currentTime;
-  if (playHead < now + 0.03) playHead = now + 0.2; // 200 ms buferis nuo trūkinėjimo
+  const buf=ctx.createBuffer(1,bytes.length,RATE), d=buf.getChannelData(0);
+  for (let i=0;i<bytes.length;i++) d[i]=MU[bytes[i]]/32768;
+  const s=ctx.createBufferSource(); s.buffer=buf; s.connect(gainOut);
+  const now=ctx.currentTime;
+  if (playHead < now+0.03) playHead = now+0.2;
   s.start(playHead); playHead += buf.duration;
 }
-
 function beep(freq, at=0, dur=0.07){
   if (!ctx) return;
-  const o=ctx.createOscillator(), g=ctx.createGain();
-  o.frequency.value=freq; o.type='sine';
-  const t = Math.max(ctx.currentTime, at);
-  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.25,t+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  const o=ctx.createOscillator(), g=ctx.createGain(); o.frequency.value=freq;
+  const t=Math.max(ctx.currentTime,at);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.25,t+0.01); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
   o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+dur+0.02);
 }
 
 // ---------- ryšys ----------
-function connect(){
+let ws=null, cur=null /* {name,pw,owner,ticket} */, pending=null, rxFrom=null, talkerName=null, reconnectTimer=null;
+let wantOpen=false, sendQueue=[];
+function ensureWs(){
+  if (ws && (ws.readyState===0 || ws.readyState===1)) return;
   clearTimeout(reconnectTimer);
   const proto = location.protocol==='https:'?'wss':'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.binaryType='arraybuffer';
-  ws.onopen = () => { $('dot').classList.add('on'); ws.send(JSON.stringify({t:'join',name:me,channel:chan})); };
+  ws.onopen = () => {
+    $('dot').classList.add('on');
+    if (cur && !pending) wsSend({t:'join', name:myName, channel:cur.name, password:cur.pw, token});
+    sendQueue.splice(0).forEach(m=>ws.send(m));
+  };
   ws.onclose = () => {
     $('dot').classList.remove('on');
     if (talking) stopTalk(true);
-    if (me) reconnectTimer = setTimeout(connect, 2000);
+    if (wantOpen) reconnectTimer=setTimeout(ensureWs, 2000);
   };
-  ws.onmessage = ev => {
-    if (ev.data instanceof ArrayBuffer){ playChunk(new Uint8Array(ev.data)); return; }
-    const m = JSON.parse(ev.data);
-    switch(m.t){
-      case 'joined': chan=m.channel; $('chName').textContent='#'+chan; renderHist(m.history); break;
-      case 'presence': talkerName=m.talker; renderUsers(m.users); updateStatus(); break;
-      case 'granted': waitGrant=false; if ($('ptt').classList.contains('down')) { talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else sendStop(); break;
-      case 'busy': waitGrant=false; vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); break;
-      case 'start': rxFrom=m.from; beep(660); vib(20); updateStatus(); break;
-      case 'stop':
-        if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
-        if (m.forced && talking){ stopTalk(true); flash('Pasiektas 60 s limitas'); }
-        if (m.item) addHist(m.item, true);
-        updateStatus(); break;
+  ws.onmessage = onMsg;
+}
+function wsSend(obj){
+  const s=JSON.stringify(obj);
+  if (ws && ws.readyState===1) ws.send(s); else { sendQueue.push(s); ensureWs(); }
+}
+
+function onMsg(ev){
+  if (ev.data instanceof ArrayBuffer){ playChunk(new Uint8Array(ev.data)); return; }
+  const m = JSON.parse(ev.data);
+  switch(m.t){
+    case 'joined': {
+      if (!pending && !cur){ wsSend({t:'leave'}); return; } // vartotojas atšaukė
+      const pw = pending ? pending.pw : (cur && cur.pw);
+      cur = { name:m.channel, pw, owner:m.owner, ticket:m.ticket };
+      upsertSaved({ name:m.channel, pw, owner:m.owner, last:Date.now() });
+      if (pending){ closeModal(); }
+      enterChannelUI(m.history);
+      break;
     }
+    case 'error':
+      if (pending){ const e=$('mErr'); if(e) e.textContent=m.msg; const b=$('mOk'); if(b) b.disabled=false; }
+      else if (m.code==='badpass' || m.code==='notfound'){
+        // pvz. pakeistas slaptažodis ar ištrintas kanalas
+        const n=cur&&cur.name; cur=null; show('scrList'); renderList();
+        toast(m.code==='badpass' ? `#${n}: slaptažodis pasikeitė` : `#${n}: kanalas nebeegzistuoja`);
+      } else toast(m.msg);
+      break;
+    case 'presence': talkerName=m.talker; renderUsers(m.users); updateStatus(); break;
+    case 'granted': if ($('ptt').classList.contains('down')){ talking=true; dsPos=0; beep(880); vib(30); updateStatus(); } else wsSend({t:'stop'}); break;
+    case 'busy': vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); $('ptt').classList.remove('down'); break;
+    case 'start': rxFrom=m.from; beep(660); vib(20); updateStatus(); break;
+    case 'stop':
+      if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
+      if (m.forced && talking){ stopTalk(true); flash('Pasiektas 60 s limitas'); }
+      if (m.item) addHist(m.item);
+      updateStatus(); break;
+    case 'cleared': $('hist').innerHTML=''; renderHistEmpty(); toast('Istorija išvalyta'); break;
+    case 'deleted': {
+      saved = saved.filter(c=>c.name!==m.channel); saveList();
+      cur=null; show('scrList'); renderList(); toast(`Kanalas #${m.channel} ištrintas`); break;
+    }
+    case 'passwordChanged': {
+      if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
+      break;
+    }
+  }
+}
+
+// ---------- vardo ekranas ----------
+$('nameBtn').onclick = () => {
+  const n=$('nameIn').value.trim();
+  if (!n){ $('nameErr').textContent='Įvesk vardą'; return; }
+  myName=n; store.set('racija_name',n);
+  afterName();
+};
+$('nameIn').addEventListener('keydown', e=>{ if(e.key==='Enter') $('nameBtn').click(); });
+
+function afterName(){
+  $('hello').textContent = `Labas, ${myName}`;
+  if (inviteData){ const d=inviteData; inviteData=null; showList(); inviteModal(d); }
+  else showList();
+}
+
+// ---------- kanalų sąrašas ----------
+function showList(){ show('scrList'); renderList(); }
+function renderList(){
+  $('hello').textContent = `Labas, ${myName}`;
+  const ul=$('chList');
+  if (!saved.length){
+    ul.innerHTML = `<div class="emptyBox"><b>Dar nėra kanalų</b>Sukurk naują grupę arba prisijunk prie esamos su pavadinimu ir slaptažodžiu.</div>`;
+    return;
+  }
+  ul.innerHTML = saved.map(c=>`
+    <li data-n="${esc(c.name)}">
+      <div class="av">${esc(c.name[0].toUpperCase())}</div>
+      <div class="nm">#${esc(c.name)}<small>${c.owner?'👑 Tu esi kūrėjas':'🔒 Narys'}</small></div>
+      <button class="x" data-rm="${esc(c.name)}" aria-label="Pašalinti">✕</button>
+    </li>`).join('');
+}
+$('chList').addEventListener('click', async e=>{
+  const rm=e.target.closest('[data-rm]');
+  if (rm){ forgetModal(rm.dataset.rm); return; }
+  const li=e.target.closest('li[data-n]'); if(!li) return;
+  const c=findSaved(li.dataset.n); if(!c) return;
+  if (!(await audioOk())) return;
+  openModal(`<h2>Jungiamasi prie #${esc(c.name)}…</h2><div class="err" id="mErr"></div><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
+  pending={pw:c.pw}; wantOpen=true;
+  wsSend({t:'join', name:myName, channel:c.name, password:c.pw, token});
+});
+
+async function audioOk(){
+  try{ await initAudio(); return true; }
+  catch(e){ toast('Leisk naudoti mikrofoną (reikia HTTPS)'); return false; }
+}
+
+$('newChBtn').onclick = () => {
+  openModal(`<h2>Nauja grupė</h2>
+    <div class="field"><label>Kanalo pavadinimas</label><input id="mName" maxlength="32" placeholder="pvz. planavimas-1"></div>
+    <div class="field"><label>Slaptažodis (bent 4 simboliai)</label><input id="mPw" maxlength="64" placeholder="kurį žinos nariai"></div>
+    <button class="btn" id="mOk">Sukurti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
+    <div class="err" id="mErr"></div>`);
+  $('mOk').onclick = async () => {
+    const n=$('mName').value.trim(), p=$('mPw').value;
+    if (n.length<2){ $('mErr').textContent='Įvesk pavadinimą'; return; }
+    if (p.length<4){ $('mErr').textContent='Slaptažodis per trumpas'; return; }
+    if (!(await audioOk())) return;
+    $('mOk').disabled=true; $('mErr').textContent='';
+    pending={pw:p}; wantOpen=true;
+    wsSend({t:'create', name:myName, channel:n, password:p, token});
+  };
+};
+
+function joinModal(prefName='', prefPw=''){
+  openModal(`<h2>Prisijungti prie grupės</h2>
+    <div class="field"><label>Kanalo pavadinimas</label><input id="mName" maxlength="32" value="${esc(prefName)}" placeholder="pvz. planavimas-1"></div>
+    <div class="field"><label>Slaptažodis</label><input id="mPw" maxlength="64" value="${esc(prefPw)}"></div>
+    <button class="btn" id="mOk">Prisijungti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
+    <div class="err" id="mErr"></div>`);
+  $('mOk').onclick = async () => {
+    const n=$('mName').value.trim(), p=$('mPw').value;
+    if (!n){ $('mErr').textContent='Įvesk pavadinimą'; return; }
+    if (!(await audioOk())) return;
+    $('mOk').disabled=true; $('mErr').textContent='';
+    pending={pw:p}; wantOpen=true;
+    wsSend({t:'join', name:myName, channel:n, password:p, token});
+  };
+}
+$('joinChBtn').onclick = () => joinModal();
+
+function inviteModal(d){
+  openModal(`<h2>Kvietimas į #${esc(d.c)}</h2>
+    <p class="muted" style="margin-top:-6px">Prisijungsi kaip <b style="color:var(--text)">${esc(myName)}</b>.</p>
+    <button class="btn" id="mOk">Prisijungti</button><button class="btn alt" onclick="closeModal()">Ne dabar</button>
+    <div class="err" id="mErr"></div>`);
+  $('mOk').onclick = async () => {
+    if (!(await audioOk())) return;
+    $('mOk').disabled=true;
+    pending={pw:d.k}; wantOpen=true;
+    wsSend({t:'join', name:myName, channel:d.c, password:d.k, token});
   };
 }
 
+function forgetModal(name){
+  openModal(`<h2>Pašalinti #${esc(name)}?</h2>
+    <p class="muted">Kanalas dings iš tavo sąrašo šiame telefone. Kiti nariai jo nepraras.</p>
+    <button class="btn danger" id="mOk">Pašalinti iš sąrašo</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
+  $('mOk').onclick = () => { saved=saved.filter(c=>c.name!==name); saveList(); closeModal(); renderList(); };
+}
+
+$('logoutBtn').onclick = () => {
+  openModal(`<h2>Atsijungti?</h2>
+    <p class="muted">Kitą kartą reikės įvesti vardą iš naujo.</p>
+    <button class="btn" id="mOk">Atsijungti</button>
+    <button class="btn danger" id="mAll">Atsijungti ir ištrinti kanalų sąrašą</button>
+    <button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
+  const out = (all) => {
+    wantOpen=false; cur=null; if (ws) ws.close();
+    myName=''; store.del('racija_name');
+    if (all){ saved=[]; saveList(); }
+    closeModal(); $('nameIn').value=''; show('scrName');
+  };
+  $('mOk').onclick = () => out(false);
+  $('mAll').onclick = () => out(true);
+};
+
+// ---------- kanalo ekranas ----------
+function enterChannelUI(history){
+  show('scrChan');
+  $('chName').textContent = '#'+cur.name;
+  $('chSub').textContent = (cur.owner?'👑 kūrėjas · ':'') + myName;
+  talkerName=null; rxFrom=null; updateStatus();
+  const hb = (findSaved(cur.name)||{}).hiddenBefore||0;
+  $('hist').innerHTML='';
+  history.filter(h=>h.ts>hb).forEach(addHist);
+  renderHistEmpty();
+  keepAwake();
+}
+$('backBtn').onclick = () => { if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
+
+$('inviteBtn').onclick = () => {
+  const link = `${location.origin}/?c=${encodeURIComponent(cur.name)}&k=${encodeURIComponent(cur.pw)}`;
+  let qrSvg='';
+  try{ const q=qrcode(0,'M'); q.addData(link); q.make(); qrSvg=q.createSvgTag({cellSize:5,margin:2,scalable:true}); }catch{}
+  openModal(`<h2>Pakviesti į #${esc(cur.name)}</h2>
+    ${qrSvg?`<div class="qr">${qrSvg}</div><p class="muted" style="text-align:center;margin:-4px 0 14px">Nuskenuok kito telefono kamera</p>`:''}
+    <div class="cred"><span>Kanalas</span><b>${esc(cur.name)}</b><span>Slaptažodis</span><b>${esc(cur.pw)}</b></div>
+    <div class="linkBox">${esc(link)}</div>
+    ${navigator.share?'<button class="btn" id="mShare">Siųsti nuorodą (WhatsApp, Viber…)</button>':''}
+    <button class="btn ${navigator.share?'alt':''}" id="mCopy">Kopijuoti nuorodą</button>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+  const text = `Prisijunk prie Racijos kanalo #${cur.name}: ${link}`;
+  if ($('mShare')) $('mShare').onclick = () => navigator.share({title:'Racija', text}).catch(()=>{});
+  $('mCopy').onclick = async () => {
+    try{ await navigator.clipboard.writeText(link); }
+    catch{ const t=document.createElement('textarea'); t.value=link; document.body.appendChild(t); t.select(); try{document.execCommand('copy')}catch{} t.remove(); }
+    toast('Nuoroda nukopijuota');
+  };
+};
+
+$('menuBtn').onclick = () => {
+  const o = cur.owner;
+  openModal(`<h2>#${esc(cur.name)}</h2>
+    <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
+    ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
+    <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
+    <button class="menuItem red" id="miDel">⛔<span>Ištrinti kanalą<small>Visi nariai bus atjungti</small></span></button>`:''}
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+  $('miMine').onclick = () => {
+    upsertSaved({name:cur.name, hiddenBefore:Date.now()});
+    $('hist').innerHTML=''; renderHistEmpty(); closeModal(); toast('Istorija išvalyta šiame telefone');
+  };
+  if (!o) return;
+  $('miAll').onclick = () => confirmModal('Išvalyti istoriją visiems?','Visų narių įrašai šiame kanale bus negrįžtamai ištrinti.','Išvalyti', ()=>wsSend({t:'clear'}));
+  $('miDel').onclick = () => confirmModal(`Ištrinti #${esc(cur.name)}?`,'Kanalas, slaptažodis ir visi įrašai bus ištrinti, nariai atjungti.','Ištrinti kanalą', ()=>wsSend({t:'delete'}));
+  $('miPw').onclick = () => {
+    openModal(`<h2>Naujas slaptažodis</h2>
+      <div class="field"><label>Slaptažodis (bent 4 simboliai)</label><input id="mPw" maxlength="64"></div>
+      <button class="btn" id="mOk">Išsaugoti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
+      <div class="err" id="mErr"></div>`);
+    $('mOk').onclick = () => {
+      const p=$('mPw').value; if (p.length<4){ $('mErr').textContent='Per trumpas'; return; }
+      $('mOk').disabled=true; pending={pw:p}; wsSend({t:'password', password:p});
+    };
+  };
+};
+function confirmModal(title, text, okText, fn){
+  openModal(`<h2>${title}</h2><p class="muted">${text}</p>
+    <button class="btn danger" id="mOk">${okText}</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
+  $('mOk').onclick = () => { fn(); closeModal(); };
+}
+
 // ---------- PTT ----------
-const ptt = $('ptt');
+const ptt=$('ptt');
 function pttDown(e){
   e.preventDefault();
   if (ptt.classList.contains('down')) return;
-  if (talkerName && talkerName!==me){ vib([60,40,60]); flash(`Užimta: kalba ${talkerName}`); return; }
+  if (talkerName && talkerName!==myName){ vib([60,40,60]); flash(`Užimta: kalba ${talkerName}`); return; }
   if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
   ptt.classList.add('down');
-  if (currentAudio){ currentAudio.pause(); }
-  waitGrant=true; ws.send(JSON.stringify({t:'start'}));
+  if (currentAudio) currentAudio.pause();
+  wsSend({t:'start'});
 }
 function pttUp(e){
   if (e) e.preventDefault();
@@ -229,88 +520,66 @@ function pttUp(e){
   if (talking) stopTalk();
 }
 function stopTalk(silent){
-  // leidžiam paskutiniam audio buferiui nueiti
-  setTimeout(()=>{ talking=false; sendStop(); if(!silent){ beep(520); } updateStatus(); }, 120);
   ptt.classList.remove('down');
+  setTimeout(()=>{ talking=false; wsSend({t:'stop'}); if(!silent) beep(520); updateStatus(); },120);
 }
-function sendStop(){ if (ws && ws.readyState===1) ws.send(JSON.stringify({t:'stop'})); }
-
 ptt.addEventListener('pointerdown', pttDown);
 ptt.addEventListener('pointerup', pttUp);
 ptt.addEventListener('pointercancel', pttUp);
 ptt.addEventListener('pointerleave', pttUp);
 ptt.addEventListener('contextmenu', e=>e.preventDefault());
-// kompiuteryje: tarpo klavišas
-document.addEventListener('keydown', e=>{ if(e.code==='Space' && !e.repeat && me && document.activeElement.tagName!=='INPUT') pttDown(e); });
-document.addEventListener('keyup', e=>{ if(e.code==='Space' && me) pttUp(e); });
+const inChan = () => !$('scrChan').classList.contains('hidden') && $('modal').classList.contains('hidden');
+document.addEventListener('keydown', e=>{ if(e.code==='Space' && !e.repeat && inChan()) pttDown(e); });
+document.addEventListener('keyup', e=>{ if(e.code==='Space' && inChan()) pttUp(e); });
 
-// ---------- UI ----------
-let flashTimer=null, flashMsg=null;
-function flash(msg){ flashMsg=msg; updateStatus(); clearTimeout(flashTimer); flashTimer=setTimeout(()=>{flashMsg=null;updateStatus()},1800); }
+// ---------- būsena / istorija ----------
+let flashMsg=null;
+function flash(msg){ flashMsg=msg; updateStatus(); clearTimeout(flash.t); flash.t=setTimeout(()=>{flashMsg=null;updateStatus()},1800); }
 function updateStatus(){
   const st=$('status'); st.className='';
-  const otherTalking = talkerName && talkerName!==me;
-  ptt.classList.toggle('locked', !!otherTalking);
+  const other = talkerName && talkerName!==myName;
+  ptt.classList.toggle('locked', !!other);
   if (flashMsg){ st.classList.add('busy'); st.textContent=flashMsg; }
   else if (talking){ st.classList.add('tx'); st.textContent='● Tu kalbi…'; }
-  else if (otherTalking){ st.classList.add('rx'); st.textContent=`🔊 Kalba ${talkerName}`; }
+  else if (other){ st.classList.add('rx'); st.textContent=`🔊 Kalba ${talkerName}`; }
   else st.textContent='Tylu';
 }
 function renderUsers(list){
   $('cnt').textContent=list.length;
-  $('users').innerHTML = list.map(u=>`<span class="chip${u===talkerName?' talk':''}">${esc(u)}${u===me?' (tu)':''}</span>`).join('');
+  $('users').innerHTML=list.map(u=>`<span class="chip${u===talkerName?' talk':''}">${esc(u)}${u===myName?' (tu)':''}</span>`).join('');
 }
-function renderHist(items){
-  $('hist').innerHTML='';
-  if (!items.length) $('hist').innerHTML='<li class="empty" style="background:none;border:0">Dar nėra žinučių</li>';
-  items.forEach(i=>addHist(i,false));
+function renderHistEmpty(){
+  if (!$('hist').querySelector('li:not(.none)')) $('hist').innerHTML='<li class="none">Dar nėra žinučių</li>';
 }
-function addHist(i, top){
-  const empty = $('hist').querySelector('.empty'); if (empty) empty.remove();
+let currentAudio=null;
+function addHist(i){
+  const none=$('hist').querySelector('.none'); if(none) none.remove();
   const li=document.createElement('li');
-  const time=new Date(i.ts).toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
-  li.innerHTML=`<span class="who">${esc(i.from)}</span><span class="t">${time} · ${i.dur}s</span><button>▶</button>`;
+  const d=new Date(i.ts), today=new Date().toDateString()===d.toDateString();
+  const time=(today?'':d.toLocaleDateString('lt-LT',{month:'2-digit',day:'2-digit'})+' ')+d.toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
+  li.innerHTML=`<span class="who">${esc(i.from)}</span><span class="t">${time} · ${i.dur}s</span><button aria-label="Groti">▶</button>`;
   li.querySelector('button').onclick=()=>playHist(i.id, li);
-  if (top) $('hist').prepend(li); else $('hist').prepend(li);
+  $('hist').prepend(li);
   while ($('hist').children.length>50) $('hist').lastChild.remove();
 }
 function playHist(id, li){
   if (currentAudio){ currentAudio.pause(); document.querySelectorAll('#hist li.playing').forEach(x=>x.classList.remove('playing')); }
-  currentAudio = new Audio('/audio/'+id);
+  currentAudio=new Audio(`/audio/${id}?k=${cur.ticket}`);
   li.classList.add('playing');
-  currentAudio.onended = currentAudio.onpause = ()=>li.classList.remove('playing');
-  currentAudio.play().catch(()=>{ li.classList.remove('playing'); flash('Įrašas nebeprieinamas'); });
+  currentAudio.onended=currentAudio.onpause=()=>li.classList.remove('playing');
+  currentAudio.play().catch(()=>{ li.classList.remove('playing'); toast('Įrašas nebeprieinamas'); });
 }
-const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const vib = p => { try{ navigator.vibrate && navigator.vibrate(p) }catch{} };
 
-async function keepAwake(){
-  try{ if ('wakeLock' in navigator && document.visibilityState==='visible') wakeLock = await navigator.wakeLock.request('screen'); }catch{}
-}
-document.addEventListener('visibilitychange', ()=>{ if (me && document.visibilityState==='visible') keepAwake(); });
+async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') await navigator.wakeLock.request('screen'); }catch{} }
+document.addEventListener('visibilitychange', ()=>{ if (cur && document.visibilityState==='visible'){ keepAwake(); ensureWs(); } });
 
-// ---------- prisijungimas ----------
-$('name').value = store.get('racija_name')||'';
-$('channel').value = store.get('racija_channel')||'bendras';
-
-$('joinBtn').onclick = async ()=>{
-  const n=$('name').value.trim(), c=$('channel').value.trim()||'bendras';
-  if (!n){ $('err').textContent='Įvesk vardą'; return; }
-  $('err').textContent='';
-  try{ await initAudio(); }
-  catch(e){ $('err').textContent='Nepavyko gauti mikrofono. Leisk naršyklei naudoti mikrofoną (reikia HTTPS).'; return; }
-  me=n; chan=c.toLowerCase();
-  store.set('racija_name',n); store.set('racija_channel',c);
-  $('meName').textContent=me;
-  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
-  keepAwake(); connect();
-};
-
-$('leaveBtn').onclick = ()=>{
-  me=null; clearTimeout(reconnectTimer);
-  if (ws) ws.close();
-  $('app').classList.add('hidden'); $('login').classList.remove('hidden');
-};
+// ---------- startas ----------
+let inviteData=null;
+(()=>{
+  const q=new URLSearchParams(location.search);
+  if (q.get('c')){ inviteData={c:q.get('c'), k:q.get('k')||''}; history.replaceState(null,'',location.pathname); }
+  if (myName) afterName(); else show('scrName');
+})();
 </script>
 </body>
 </html>
