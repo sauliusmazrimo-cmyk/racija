@@ -131,6 +131,7 @@ input:focus{border-color:var(--accent)}
 #stopBtn.hold .fill{width:100%;transition:width 1s linear}
 #cmdChips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
 #cmdChips::-webkit-scrollbar{display:none}
+#cmdChips{-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
 .cmdChip{flex:none;padding:12px 16px;border-radius:12px;border:1px solid rgba(255,138,31,.45);background:rgba(255,138,31,.12);
   color:var(--text);font-weight:700;font-size:15px;white-space:nowrap}
 .cmdChip.edit{border-color:var(--line);background:var(--panel);color:var(--muted);font-weight:500}
@@ -237,6 +238,7 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
     <button class="icon" id="backBtn" aria-label="Atgal">←</button>
     <div class="grow"><div class="chTitle"><span class="dot" id="dot"></span><span id="chName"></span></div>
       <div class="hello" id="chSub"></div></div>
+    <button class="icon" id="timerBtn" aria-label="Laikmatis">⏰</button>
     <button class="icon" id="inviteBtn" aria-label="Pakviesti">👥</button>
     <button class="icon" id="menuBtn" aria-label="Meniu">⋯</button>
   </div>
@@ -797,6 +799,7 @@ $('menuBtn').onclick = () => {
   const o = cur.owner;
   openModal(`<h2>#${esc(cur.name)}</h2>
     <button class="menuItem" id="miNoisy">🎧<span>Triukšminga aplinka: <b style="color:${noisy?'var(--ok)':'var(--muted)'}">${noisy?'ĮJUNGTA':'IŠJUNGTA'}</b><small>Šūviai nesustiprinami, balsas aiškesnis su BT ausinėmis</small></span></button>
+    <button class="menuItem" id="miTimer">⏰<span>Laikmatis<small>Atgalinis laiko skaičiavimas visiems kanalo nariams</small></span></button>
     <button class="menuItem" id="miCmds">📢<span>Greitos komandos<small>Keisti tekstą, įrašyti savo balsu</small></span></button>
     ${NATIVE?`<button class="menuItem" id="miMesh">📡<span>LoRa (Meshtastic): ${esc(MESH_LABEL[meshState.state]||'')}<small>STOP ir komandos be interneto</small></span></button>`:''}
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
@@ -811,6 +814,7 @@ $('menuBtn').onclick = () => {
     $('menuBtn').click();
   };
   $('miCmds').onclick = () => cmdEditor();
+  $('miTimer').onclick = () => timerModal();
   if ($('miMesh')) $('miMesh').onclick = () => meshModal();
   $('miMine').onclick = () => {
     upsertSaved({name:cur.name, hiddenBefore:Date.now()});
@@ -1041,6 +1045,7 @@ function timerModal(){
   if ($('tClearCode')) $('tClearCode').onclick=()=>{ wsSend({t:'timerCode', code:''}); toast('Kodas išjungtas'); };
 }
 $('timerCard').onclick = () => timerModal();
+$('timerBtn').onclick = () => timerModal();
 
 // ---------- greitos komandos ----------
 const DEFAULT_CMDS = [
@@ -1060,7 +1065,7 @@ const b64dec = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
 function renderCmdChips(){
   $('cmdChips').innerHTML = cmds.filter(c=>!c.alarm).map(c=>
     `<button class="cmdChip" data-id="${esc(c.id)}">${c.audio?'🎙️ ':''}${esc(c.text)}</button>`).join('')
-    + `<button class="cmdChip" id="cmdTimer">⏰ Laikmatis</button><button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
+    + `<button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
   $('stopBtn').querySelector('b').textContent = '🚨 ' + stopCmd().text.toUpperCase();
 }
 $('cmdChips').addEventListener('click', e=>{
