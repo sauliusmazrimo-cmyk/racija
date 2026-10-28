@@ -516,7 +516,7 @@ function onMsg(ev){
         $('mRm').onclick=()=>{ saved=saved.filter(x=>x.name!==c.name); saveList(); closeModal(); renderList(); };
         break;
       }
-      if (pending){ const e=$('mErr'); if(e) e.textContent=m.msg; const b=$('mOk'); if(b) b.disabled=false; }
+      if (pending){ const e=$('mErr'); if(e){ e.style.color=''; e.textContent=m.msg; } const b=$('mOk'); if(b) b.disabled=false; }
       else if (m.code==='badpass' || m.code==='notfound'){
         // pvz. pakeistas slaptažodis ar ištrintas kanalas
         const n=cur&&cur.name; cur=null; show('scrList'); renderList();
@@ -644,13 +644,22 @@ $('chList').addEventListener('click', async e=>{
 $('adminBtn').onclick = () => adminKey ? openAdmin() : adminLogin();
 function adminLogin(){
   openModal(`<h2>🛡️ Administratorius</h2>
-    <div class="field"><label>Administratoriaus raktas (ADMIN_KEY)</label><input id="mKey" type="password" autocomplete="off"></div>
+    <div class="field"><label>Administratoriaus raktas (ADMIN_KEY)</label>
+      <div class="row2" style="grid-template-columns:1fr auto"><input id="mKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button class="btn alt" id="mEye" style="margin:0;width:56px">👁</button></div></div>
     <button class="btn" id="mOk">Prisijungti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
     <div class="err" id="mErr"></div>`);
+  $('mEye').onclick = () => { const i=$('mKey'); i.type = i.type==='password' ? 'text' : 'password'; };
+  $('mKey').addEventListener('keydown', e=>{ if (e.key==='Enter') $('mOk').click(); });
   $('mOk').onclick = () => {
-    const k=$('mKey').value; if(!k) return;
-    $('mOk').disabled=true; pending={adminAuth:true, key:k}; wantOpen=true;
+    const k=$('mKey').value.trim();
+    if (!k){ $('mErr').textContent='Įvesk raktą'; return; }
+    $('mOk').disabled=true; $('mErr').style.color='var(--muted)'; $('mErr').textContent='Jungiamasi…';
+    pending={adminAuth:true, key:k}; wantOpen=true;
     wsSend({t:'admin', key:k});
+    clearTimeout(adminLogin.t);
+    adminLogin.t = setTimeout(()=>{ if (pending && pending.adminAuth && $('mErr')){
+      $('mErr').style.color=''; $('mErr').textContent='Serveris neatsako. Patikrink internetą ir bandyk dar kartą.'; $('mOk').disabled=false; } }, 8000);
   };
 }
 function openAdmin(){
