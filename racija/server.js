@@ -83,6 +83,7 @@ function prune() {
   const cut = Date.now() - RETENTION_MS;
   let changed = false;
   for (const ch of Object.values(db.channels)) {
+    if (ch.timer && ch.timer.end < Date.now() - 3600000) { ch.timer = null; changed = true; }
     const keep = [];
     for (const h of ch.history) { if (h.ts < cut) { rmAudio(h.id); changed = true; } else keep.push(h); }
     ch.history = keep;
@@ -226,6 +227,19 @@ function uniqueName(ws, name) {
   ws.user = `${ws.user} (${i})`;
 }
 
+// ---------- laikmatis ----------
+const timerView = (ch) => ch && ch.timer ? { title: ch.timer.title, start: ch.timer.start, end: ch.timer.end, by: ch.timer.by } : null;
+function checkCode(code, ch) {
+  if (!ch.timerCode) return false;
+  const a = Buffer.from(hashPw(code, ch.timerCode.salt), 'hex'), b = Buffer.from(ch.timerCode.hash, 'hex');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function pushHist(ch, item) {
+  ch.history.push(item);
+  while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
+  saveDb();
+}
+
 function attach(ws, name) {
   leave(ws);
   uniqueName(ws, name);
@@ -233,7 +247,7 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history });
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, now: Date.now() });
   presence(name);
 }
 
@@ -325,6 +339,47 @@ wss.on('connection', (ws, req) => {
         return send(ws, { t: 'publicList', channels: Object.entries(db.channels).filter(([, c]) => c.public)
           .map(([name]) => ({ name, online: live.has(name) ? live.get(name).clients.size : 0 }))
           .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) });
+      case 'timerSet':
+      case 'timerStop': {
+        if (!ch) return;
+        if (!canManage(ws)) {
+          if (!ch.timerCode) return err(ws, 'notimerperm', 'Laikmatį nustato kanalo kūrėjas. Paprašyk jo laikmačio kodo.');
+          if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
+          if (!m.code || !checkCode(String(m.code), ch)) return failAuth(ws, 'badcode', 'Neteisingas laikmačio kodas');
+        }
+        const now = Date.now();
+        let item;
+        if (m.t === 'timerStop') {
+          if (!ch.timer) return;
+          item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: ch.timer.title, timer: 'stop' };
+          ch.timer = null;
+        } else {
+          let end, start = now, kind = 'set';
+          if (m.extendMin && ch.timer) { end = Math.max(ch.timer.end, now) + Number(m.extendMin) * 60000; start = ch.timer.start; kind = 'extend'; }
+          else if (m.endAt) end = Number(m.endAt);
+          else end = now + Number(m.minutes) * 60000;
+          if (!Number.isFinite(end) || end < now + 30000 || end > now + 7 * 24 * 3600000)
+            return err(ws, 'badtime', 'Netinkamas laikas: nuo 1 min. iki 7 parų');
+          const title = String(m.title || (ch.timer && ch.timer.title) || 'Susitikimas').trim().slice(0, 40) || 'Susitikimas';
+          ch.timer = { title, start, end: Math.round(end), by: ws.user };
+          item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: title, timer: kind, end: ch.timer.end };
+        }
+        pushHist(ch, item);
+        return broadcast(ws.chan, { t: 'timer', timer: timerView(ch), now, item });
+      }
+      case 'timerCode': {
+        if (!ch) return;
+        if (!canManage(ws)) return err(ws, 'notowner', 'Laikmačio kodą nustato tik kūrėjas');
+        const code = String(m.code || '');
+        if (!code) ch.timerCode = null;
+        else {
+          if (code.length < 4) return err(ws, 'shortcode', 'Kodas turi būti bent 4 simbolių');
+          const salt = crypto.randomBytes(16).toString('hex');
+          ch.timerCode = { salt, hash: hashPw(code, salt) };
+        }
+        saveDb();
+        return broadcast(ws.chan, { t: 'timerCode', on: !!ch.timerCode });
+      }
       case 'setPublic':
         if (!ch) return;
         if (!canManage(ws)) return err(ws, 'notowner', 'Keisti gali tik kūrėjas');
@@ -486,8 +541,8 @@ app.get('/version', async (_, res) => {
 });
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.6', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  ok: true, version: '0.7', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
 }));
 
-server.listen(PORT, () => console.log(`311 VoiceCH v0.6: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.7: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));

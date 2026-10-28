@@ -177,6 +177,20 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 #updBar .ut b{display:block;font-size:15px}
 #updBar .ut small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 #updBar .ub{flex:none;padding:9px 12px;border-radius:10px;background:var(--rx);color:#001018;font-weight:800;font-size:14px}
+#timerCard{margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid rgba(63,169,245,.45);cursor:pointer}
+#timerCard .tTop{display:flex;justify-content:space-between;gap:10px;font-size:14px;color:var(--muted)}
+#timerCard #tTitle{color:var(--text);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tLeft{font-size:38px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums;margin:2px 0 8px;color:var(--rx)}
+.tBar{height:8px;border-radius:6px;background:var(--line);overflow:hidden}
+.tBar i{display:block;height:100%;width:0;background:var(--rx);transition:width .5s linear}
+#timerCard.warn{border-color:rgba(255,138,31,.6)} #timerCard.warn #tLeft{color:var(--accent)} #timerCard.warn .tBar i{background:var(--accent)}
+#timerCard.crit{border-color:rgba(231,76,60,.7)} #timerCard.crit #tLeft{color:#ff6b5b} #timerCard.crit .tBar i{background:var(--busy)}
+#timerCard.done{border-color:var(--busy);animation:tdone 1s steps(1) infinite} #timerCard.done #tLeft{color:#ff6b5b;font-size:28px} #timerCard.done .tBar i{background:var(--busy)}
+@keyframes tdone{50%{background:rgba(231,76,60,.18)}}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.quick button{padding:12px 4px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-weight:700;font-size:15px}
+.quick button.on{border-color:var(--accent);background:rgba(255,138,31,.15)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -228,6 +242,11 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
   </div>
 
   <div id="status">Tylu</div>
+  <div id="timerCard" class="hidden">
+    <div class="tTop"><span id="tTitle">⏰</span><span id="tEnd"></span></div>
+    <div id="tLeft">0:00:00</div>
+    <div class="tBar"><i id="tFill"></i></div>
+  </div>
   <div id="cmdBar">
     <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
     <div id="cmdChips"></div>
@@ -425,6 +444,7 @@ function onMsg(ev){
       upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, last:Date.now() });
       if (pending){ closeModal(); }
       enterChannelUI(m.history);
+      cur.timerCode = !!m.timerCode; setTimerState(m.timer, m.now);
       break;
     }
     case 'error':
@@ -500,6 +520,16 @@ function onMsg(ev){
       box.querySelectorAll('.pubCh').forEach(b=>b.onclick=()=>{ $('mName').value=b.dataset.n; const s=findSaved(b.dataset.n); $('mPw').value=s&&s.pw||''; $('mPw').focus(); });
       break;
     }
+    case 'timer':
+      setTimerState(m.timer, m.now);
+      if (m.item) addHist(m.item);
+      if (pending && pending.timer){ closeModal(); }
+      if (m.item && m.item.from!==myName){
+        if (m.item.timer==='stop') showBanner('⏹ '+m.item.cmd+': sustabdytas', m.item.from);
+        else showBanner('⏰ '+m.item.cmd+' · iki '+hhmm(m.item.end), m.item.from+(m.item.timer==='extend'?' pratęsė':' nustatė'));
+      }
+      break;
+    case 'timerCode': if (cur){ cur.timerCode=m.on; if ($('tmMark')) timerModal(); } break;
     case 'publicSet': if (cur){ cur.public=m.on; toast(m.on?'Grupė rodoma bendrame sąraše':'Grupė paslėpta iš bendro sąrašo'); } break;
     case 'passwordChanged': {
       if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
@@ -731,7 +761,7 @@ function enterChannelUI(history){
   renderHistEmpty();
   keepAwake();
 }
-$('backBtn').onclick = () => { if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
+$('backBtn').onclick = () => { setTimerState(null); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
 
 function renderChSub(){
   $('chSub').textContent = (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
@@ -879,7 +909,11 @@ function addHist(i){
   const li=document.createElement('li');
   const d=new Date(i.ts), today=new Date().toDateString()===d.toDateString();
   const time=(today?'':d.toLocaleDateString('lt-LT',{month:'2-digit',day:'2-digit'})+' ')+d.toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
-  if (i.cmd){
+  if (i.timer){
+    li.className='cmd';
+    const what = i.timer==='stop' ? 'sustabdė laikmatį' : (i.timer==='extend'?'pratęsė iki ':'nustatė iki ')+hhmm(i.end);
+    li.innerHTML=`<span class="who">⏰ ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)} ${what}</small></span><span class="t">${time}</span>`;
+  } else if (i.cmd){
     li.className = i.alarm ? 'alarm' : 'cmd';
     li.innerHTML=`<span class="who">${i.alarm?'🚨':'📢'} ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)}</small></span><span class="t">${time}</span>`;
   } else {
@@ -926,6 +960,88 @@ async function playHist(id, li, retried){
 async function keepAwake(){ try{ if('wakeLock' in navigator && document.visibilityState==='visible') await navigator.wakeLock.request('screen'); }catch{} }
 document.addEventListener('visibilitychange', ()=>{ if (cur && document.visibilityState==='visible'){ keepAwake(); ensureWs(); } });
 
+// ---------- laikmatis ----------
+let timer=null, srvOff=0, tFired={};
+const hhmm = ts => new Date(ts).toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
+const sNow = () => Date.now() + srvOff;
+function fmtLeft(ms){
+  const t=Math.max(0,Math.ceil(ms/1000)), h=Math.floor(t/3600), m=Math.floor(t%3600/60), sec=t%60;
+  return (h? h+':'+String(m).padStart(2,'0') : String(m)) + ':' + String(sec).padStart(2,'0');
+}
+function setTimerState(t, now){
+  if (now) srvOff = now - Date.now();
+  const same = timer && t && timer.end===t.end;
+  timer = t || null;
+  if (!same){ const left = timer ? timer.end - sNow() : 0; tFired = {w10: left<=600000, w1: left<=60000, end: left<=0}; }
+  tickTimer();
+}
+function tickTimer(){
+  const card=$('timerCard');
+  if (!timer){ card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+  const now=sNow(), left=timer.end-now, total=Math.max(1,timer.end-timer.start);
+  $('tTitle').textContent = '⏰ ' + timer.title;
+  $('tEnd').textContent = 'iki ' + hhmm(timer.end);
+  $('tFill').style.width = Math.min(100, Math.max(0,(now-timer.start)/total*100)) + '%';
+  card.className = left<=0 ? 'done' : left<=60000 ? 'crit' : left<=600000 ? 'warn' : '';
+  const ago = Math.floor(-left/60000);
+  $('tLeft').textContent = left>0 ? fmtLeft(left) : (ago<1 ? 'Laikas baigėsi!' : 'Baigėsi prieš ' + ago + ' min.');
+  // įspėjimai: kiekvienas tik kartą
+  if (left<=600000 && !tFired.w10){ tFired.w10=true; if (left>60000){ showBanner('⏰ Liko 10 min.', timer.title); beep(880); beep(880, ctx?ctx.currentTime+0.2:0); vib([120,80,120]); } }
+  if (left<=60000 && !tFired.w1){ tFired.w1=true; if (left>0){ showBanner('⏰ Liko 1 min.', timer.title); beep(988); beep(988, ctx?ctx.currentTime+0.15:0); beep(988, ctx?ctx.currentTime+0.3:0); vib([150,80,150,80,150]); } }
+  if (left<=0 && !tFired.end){ tFired.end=true; showBanner('⏰ Laikas! ' + timer.title, 'Laikas baigėsi '+hhmm(timer.end), 10000);
+    if (ctx){ const t0=ctx.currentTime; for (let i=0;i<6;i++){ beep(i%2?1175:880, t0+i*0.25, 0.18); } }
+    vib([400,150,400,150,800]); speak('Laikas. ' + timer.title); }
+}
+setInterval(tickTimer, 500);
+
+function timerModal(){
+  if (!cur) return;
+  const own=cur.owner, t=timer, saved1=findSaved(cur.name)||{};
+  const canUse = own || cur.timerCode;
+  openModal(`<div id="tmMark"></div><h2>⏰ Laikmatis</h2>
+    ${t?`<div class="meshCard ok" style="margin-bottom:12px"><span class="mi">⏰</span><span class="mt"><b>${esc(t.title)} · ${fmtLeft(t.end-sNow())}</b><small>iki ${hhmm(t.end)} · nustatė ${esc(t.by)}</small></span></div>
+      <div class="row2" style="margin-bottom:10px"><button class="btn alt" data-ext="15">＋15 min</button><button class="btn alt" data-ext="30">＋30 min</button></div>
+      <button class="btn danger" id="tStop" style="margin-bottom:16px">⏹ Sustabdyti laikmatį</button>
+      <div class="sec"><span>Arba nustatyti naują</span></div>`:''}
+    ${!canUse?`<p class="muted">Laikmatį nustato kanalo kūrėjas. Jis gali nustatyti laikmačio kodą, kad ir kiti nariai galėtų jį valdyti.</p>`:`
+    <div class="field"><label>Pavadinimas</label><input id="tName" maxlength="40" value="${esc(t?t.title:'Susitikimas')}"></div>
+    <label>Trukmė nuo dabar</label>
+    <div class="quick" style="margin-top:6px">${[[15,'15 min'],[30,'30 min'],[60,'1 val.'],[120,'2 val.']].map(([m,l])=>`<button data-min="${m}">${l}</button>`).join('')}</div>
+    <div class="row2"><div class="field"><label>Valandos</label><input id="tH" type="number" min="0" max="168" inputmode="numeric" placeholder="0"></div>
+      <div class="field"><label>Minutės</label><input id="tM" type="number" min="0" max="59" inputmode="numeric" placeholder="0"></div></div>
+    <div class="field"><label>Arba iki valandos</label><input id="tAt" type="time"></div>
+    ${own?'':`<div class="field"><label>Laikmačio kodas</label><input id="tCode" maxlength="32" value="${esc(saved1.timerCode||'')}"></div>`}
+    <button class="btn" id="tGo">▶ Paleisti</button>`}
+    ${own?`<div class="sec" style="margin-top:16px"><span>Laikmačio kodas nariams</span></div>
+      <p class="muted" style="margin-top:0;font-size:13px">${cur.timerCode?'Kodas nustatytas: jį žinantys nariai gali valdyti laikmatį.':'Kodas nenustatytas: laikmatį valdo tik kūrėjai.'}</p>
+      <div class="row2"><input id="tNewCode" maxlength="32" placeholder="naujas kodas"><button class="btn alt" id="tSaveCode" style="margin:0">Išsaugoti</button></div>
+      ${cur.timerCode?'<button class="btn alt" id="tClearCode" style="margin-top:8px">Išjungti kodą</button>':''}`:''}
+    <button class="btn alt" onclick="closeModal()" style="margin-top:10px">Uždaryti</button>
+    <div class="err" id="mErr"></div>`);
+  const code = () => { const c=$('tCode'); if (!c) return undefined; upsertSaved({name:cur.name, timerCode:c.value}); return c.value; };
+  const send = msg => { pending={timer:true}; $('mErr').textContent=''; wsSend({...msg, code:code()}); };
+  $('modalBox').querySelectorAll('[data-min]').forEach(b=>b.onclick=()=>{
+    $('modalBox').querySelectorAll('[data-min]').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    const m=+b.dataset.min; $('tH').value=Math.floor(m/60)||''; $('tM').value=m%60||''; $('tAt').value=''; });
+  $('modalBox').querySelectorAll('[data-ext]').forEach(b=>b.onclick=()=>send({t:'timerSet', extendMin:+b.dataset.ext}));
+  if ($('tStop')) $('tStop').onclick=()=>send({t:'timerStop'});
+  if ($('tGo')) $('tGo').onclick=()=>{
+    const title=$('tName').value.trim()||'Susitikimas';
+    if ($('tAt').value){
+      const [hh,mm]=$('tAt').value.split(':').map(Number); const d=new Date(); d.setHours(hh,mm,0,0);
+      if (d.getTime() <= Date.now()+30000) d.setDate(d.getDate()+1);   // jei laikas jau praėjo – rytoj
+      return send({t:'timerSet', title, endAt:d.getTime()+srvOff});
+    }
+    const min=(+$('tH').value||0)*60 + (+$('tM').value||0);
+    if (min<1){ $('mErr').textContent='Pasirink trukmę arba valandą'; return; }
+    send({t:'timerSet', title, minutes:min});
+  };
+  if ($('tSaveCode')) $('tSaveCode').onclick=()=>{ const c=$('tNewCode').value.trim(); if (c.length<4){ $('mErr').textContent='Kodas bent 4 simboliai'; return; } wsSend({t:'timerCode', code:c}); toast('Laikmačio kodas išsaugotas'); };
+  if ($('tClearCode')) $('tClearCode').onclick=()=>{ wsSend({t:'timerCode', code:''}); toast('Kodas išjungtas'); };
+}
+$('timerCard').onclick = () => timerModal();
+
 // ---------- greitos komandos ----------
 const DEFAULT_CMDS = [
   {id:'stop',  text:'Stop visiems', alarm:true},
@@ -944,11 +1060,12 @@ const b64dec = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
 function renderCmdChips(){
   $('cmdChips').innerHTML = cmds.filter(c=>!c.alarm).map(c=>
     `<button class="cmdChip" data-id="${esc(c.id)}">${c.audio?'🎙️ ':''}${esc(c.text)}</button>`).join('')
-    + `<button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
+    + `<button class="cmdChip" id="cmdTimer">⏰ Laikmatis</button><button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
   $('stopBtn').querySelector('b').textContent = '🚨 ' + stopCmd().text.toUpperCase();
 }
 $('cmdChips').addEventListener('click', e=>{
   if (e.target.closest('#cmdEdit')){ cmdEditor(); return; }
+  if (e.target.closest('#cmdTimer')){ timerModal(); return; }
   const b=e.target.closest('.cmdChip[data-id]'); if(!b) return;
   const c=cmds.find(x=>x.id===b.dataset.id); if(c) sendCmd(c);
 });
@@ -1023,6 +1140,11 @@ $('alarmOk').onclick = () => {
   $('alarm').classList.add('hidden'); stopSiren(); vib(0);
   if (NATIVE) try{ Native311.alarmStop(); }catch{}
 };
+function showBanner(text, sub, ms=4500){
+  $('cbTxt').textContent = text; $('cbFrom').textContent = sub||'';
+  $('cmdBanner').classList.remove('hidden');
+  clearTimeout(showCmd.t); showCmd.t=setTimeout(()=>$('cmdBanner').classList.add('hidden'), ms);
+}
 function showCmd(from, text, voice){
   $('cbTxt').textContent = '📢 ' + text;
   $('cbFrom').textContent = from;
