@@ -33,8 +33,17 @@ jobs:
         working-directory: android
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Paruošti failą
-        run: cp android/app/build/outputs/apk/release/app-release.apk 311VoiceCH.apk
+      - name: Paruošti failus
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk 311VoiceCH.apk
+          # versijos informacija programėlei: ji palygina su savo numeriu ir pasiūlo atnaujinti
+          python3 - <<'PY'
+          import json, os
+          notes = open('android/RELEASE_NOTES.txt', encoding='utf-8').read().strip() if os.path.exists('android/RELEASE_NOTES.txt') else ''
+          n = int(os.environ['GITHUB_RUN_NUMBER'])
+          json.dump({'code': n, 'name': f'1.0.{n}', 'notes': notes}, open('version.json', 'w', encoding='utf-8'), ensure_ascii=False)
+          PY
+          cat version.json
 
       - name: Įkelti į Releases
         uses: softprops/action-gh-release@v2
@@ -43,7 +52,9 @@ jobs:
           name: 311 VoiceCH Android
           make_latest: true
           overwrite_files: true
-          files: 311VoiceCH.apk
+          files: |
+            311VoiceCH.apk
+            version.json
           body: |
             311 VoiceCH Android programėlė (build ${{ github.run_number }}).
             Parsisiųsti telefone: https://racija-production.up.railway.app/apk

@@ -222,6 +222,12 @@ public class MainActivity extends Activity {
         });
     }
 
+    static void updateStatus(String msg) {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativeUpdateStatus&&nativeUpdateStatus(" + jsStr(msg) + ")", null));
+    }
+
     // ---------- Meshtastic tiltas ----------
     static void meshStatus(String json) {
         MainActivity a = instance;
@@ -248,6 +254,7 @@ public class MainActivity extends Activity {
             VoiceService.alarm(text, from); // dublikatai jau atmesti per markSeen
         }
         @JavascriptInterface public void audioIdle() { VoiceService.audioIdle(); }
+        @JavascriptInterface public void installUpdate(String url) { runOnUiThread(() -> Updater.start(MainActivity.this, url)); }
         /** Iškarpinės tekstas (kviečiama tik paspaudus „Įklijuoti“). */
         @JavascriptInterface public String clipboardText() {
             try {

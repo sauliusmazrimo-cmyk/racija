@@ -170,6 +170,13 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 .check{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);margin-bottom:14px;color:var(--text);font-size:15px}
 .check input{width:22px;height:22px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
 .check small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
+#updBar{display:flex;align-items:center;gap:12px;width:100%;max-width:520px;margin:10px auto 0;padding:12px 14px;border-radius:14px;
+  border:1px solid rgba(63,169,245,.5);background:rgba(63,169,245,.12);color:var(--text);text-align:left;flex:none}
+#updBar .ui{font-size:22px}
+#updBar .ut{flex:1;min-width:0}
+#updBar .ut b{display:block;font-size:15px}
+#updBar .ut small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+#updBar .ub{flex:none;padding:9px 12px;border-radius:10px;background:var(--rx);color:#001018;font-weight:800;font-size:14px}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -193,6 +200,8 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 </section>
 
 <!-- 2. Kanalų sąrašas -->
+<button id="updBar" class="hidden"><span class="ui">🔄</span><span class="ut"><b>Yra nauja programėlės versija</b><small id="updNotes"></small></span><span class="ub">Atnaujinti</span></button>
+
 <section id="scrList" class="scr hidden">
   <div class="top">
     <div class="grow"><div class="brand"><span>311</span> VoiceCH</div><div class="hello" id="hello"></div></div>
@@ -1190,6 +1199,30 @@ function renderMeshModal(){
   if ($('mOff')) $('mOff').onclick = () => Native311.meshDisconnect();
 }
 if (NATIVE){ setTimeout(meshRefresh, 800); setInterval(meshRefresh, 5000); }
+
+// ---------- programėlės atnaujinimai ----------
+let updInfo=null;
+async function checkUpdate(){
+  if (!NATIVE) return;
+  let mine=0; try{ mine=parseInt(String(Native311.version()).split('.').pop())||0; }catch{}
+  try{
+    const r = await (await fetch('/version',{cache:'no-store'})).json();
+    if (r && r.code > mine){ updInfo=r; $('updNotes').textContent = (r.notes ? r.notes : `Versija ${r.name}`); $('updBar').classList.remove('hidden'); }
+    else $('updBar').classList.add('hidden');
+  }catch{}
+}
+window.nativeUpdateStatus = msg => toast(msg);
+$('updBar').onclick = () => {
+  const url = location.origin + '/apk';
+  if (Native311.installUpdate){ try{ Native311.installUpdate(url); toast('Siunčiama nauja versija…'); return; }catch{} }
+  // senesnė programėlė: tiesioginė GitHub nuoroda atsidaro naršyklėje, o programėlė lieka savo vietoje
+  location.href = 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk';
+};
+if (NATIVE){
+  setTimeout(checkUpdate, 2500);
+  setInterval(checkUpdate, 6*3600*1000);
+  document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') checkUpdate(); });
+}
 
 // sąsaja veikia ir be interneto (išsaugoma telefone)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});

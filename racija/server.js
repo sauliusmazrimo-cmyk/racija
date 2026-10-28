@@ -471,6 +471,20 @@ app.get('/audio/:id', (req, res) => {
 
 app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
 
+// naujausios Android versijos informacija (iš GitHub Releases, laikoma 10 min.)
+const VERSION_URL = process.env.APK_VERSION_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/version.json';
+let verCache = { at: 0, data: { code: 0 } };
+app.get('/version', async (_, res) => {
+  if (Date.now() - verCache.at > 10 * 60 * 1000) {
+    try {
+      const r = await fetch(VERSION_URL, { signal: AbortSignal.timeout(5000) });
+      if (r.ok) { const d = await r.json(); if (Number.isFinite(+d.code)) verCache = { at: Date.now(), data: { code: +d.code, name: String(d.name || ''), notes: String(d.notes || '').slice(0, 500) } }; }
+      else verCache.at = Date.now() - 9 * 60 * 1000; // bandom vėl po minutės
+    } catch { verCache.at = Date.now() - 9 * 60 * 1000; }
+  }
+  res.set('Cache-Control', 'no-store').json(verCache.data);
+});
+
 app.get('/health', (_, res) => res.json({
   ok: true, version: '0.6', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
