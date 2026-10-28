@@ -10,7 +10,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
-const RETENTION_MS = (Number(process.env.RETENTION_HOURS) || 48) * 3600 * 1000;
+const RETENTION_MS = (Number(process.env.RETENTION_HOURS) || 6) * 3600 * 1000;
 const RATE = 16000;
 const MAX_TALK_MS = 60000;
 const HISTORY_LIMIT = 50;

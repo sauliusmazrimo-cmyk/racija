@@ -898,7 +898,7 @@ function freshTicket(old){
     else if (Date.now()-t0>4000){ clearInterval(iv); res(false); } }, 150); });
 }
 const AUDIO_ERR = {
-  deleted: 'Įrašas ištrintas (senesnis nei 48 val. arba išvalyta istorija)',
+  deleted: 'Įrašas ištrintas (senesnis nei 6 val. arba išvalyta istorija)',
   file: 'Įrašo failas nerastas serveryje',
   decrypt: 'Įrašo failas pažeistas',
   ticket: 'Ryšys atsinaujino – bandyk dar kartą'
