@@ -211,6 +211,21 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 .pRow .pi{color:var(--muted);font-size:13px;white-space:nowrap}
 .leaflet-tooltip.mapLbl{background:rgba(11,15,20,.85);color:#fff;border:0;border-radius:8px;padding:2px 7px;font-weight:700;box-shadow:none}
 .leaflet-tooltip.mapLbl:before{display:none}
+#meetCard{display:flex;align-items:center;gap:12px;width:100%;margin-top:10px;padding:10px 14px;border-radius:14px;background:var(--panel);
+  border:1px solid rgba(231,76,60,.45);color:var(--text);text-align:left}
+#meetCard .mf{font-size:22px}
+#meetCard .mt2{flex:1;min-width:0}
+#meetCard b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#meetCard small{display:block;color:var(--muted);font-size:13px}
+#mtArrow{font-size:26px;font-weight:900;color:var(--accent);transition:transform .4s;flex:none;width:30px;text-align:center}
+#placeHint{padding:10px 16px;background:rgba(231,76,60,.18);color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;justify-content:space-between}
+#placeHint button{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;padding:5px 10px}
+.flagIcon{font-size:30px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
+.leaflet-tooltip.distLbl{background:#3fa9f5;color:#001018;border:0;border-radius:8px;padding:2px 8px;font-weight:800;box-shadow:none}
+.leaflet-tooltip.distLbl:before{display:none}
+.leaflet-tooltip.flagLbl{background:#b3160c;color:#fff;border:0;border-radius:8px;padding:2px 8px;font-weight:800;box-shadow:none}
+.leaflet-tooltip.flagLbl:before{display:none}
+.pRow.meet{border-color:rgba(231,76,60,.5)}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -268,6 +283,7 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
     <div id="tLeft">0:00:00</div>
     <div class="tBar"><i id="tFill"></i></div>
   </div>
+  <button id="meetCard" class="hidden"><span class="mf">🚩</span><span class="mt2"><b id="mtTitle"></b><small id="mtInfo"></small></span><span id="mtArrow">↑</span></button>
   <div id="cmdBar">
     <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
     <div id="cmdChips"></div>
@@ -291,8 +307,10 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
   <div class="mapTop">
     <button class="icon" id="mapBack" aria-label="Atgal">←</button>
     <div class="grow"><b id="mapTitle">Žemėlapis</b><small id="mapSub"></small></div>
+    <button class="shareBtn" id="meetBtn" aria-label="Susitikimo vieta">🚩</button>
     <button class="shareBtn" id="shareBtn">📍 Rodyti mane</button>
   </div>
+  <div id="placeHint" class="hidden">Paspausk žemėlapyje, kur bus susitikimo vieta <button id="placeCancel">Atšaukti</button></div>
   <div id="map"></div>
   <div id="mapList"></div>
 </div>
@@ -475,7 +493,7 @@ function onMsg(ev){
       if (pending){ closeModal(); }
       enterChannelUI(m.history);
       cur.timerCode = !!m.timerCode; setTimerState(m.timer, m.now);
-      myLocId = m.locId; setLocs(m.locs||[]); resumeSharing();
+      myLocId = m.locId; setLocs(m.locs||[]); setMeet(m.meet); resumeSharing();
       break;
     }
     case 'error':
@@ -562,6 +580,11 @@ function onMsg(ev){
       break;
     case 'timerCode': if (cur){ cur.timerCode=m.on; if ($('tmMark')) timerModal(); } break;
     case 'locs': setLocs(m.list, m.now); break;
+    case 'meet':
+      setMeet(m.meet); if (m.item) addHist(m.item);
+      if (pending && pending.meet) closeModal();
+      if (m.item && m.item.from!==myName) showBanner(m.meet ? '🚩 '+m.meet.title : '🚩 Susitikimo vieta pašalinta', m.item.from + (m.meet ? ' pažymėjo žemėlapyje' : ''));
+      break;
     case 'publicSet': if (cur){ cur.public=m.on; toast(m.on?'Grupė rodoma bendrame sąraše':'Grupė paslėpta iš bendro sąrašo'); } break;
     case 'passwordChanged': {
       if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
@@ -793,7 +816,7 @@ function enterChannelUI(history){
   renderHistEmpty();
   keepAwake();
 }
-$('backBtn').onclick = () => { setTimerState(null); pauseSharing(); closeMap(); setLocs([]); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
+$('backBtn').onclick = () => { setTimerState(null); pauseSharing(); closeMap(); setLocs([]); setMeet(null); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
 
 function renderChSub(){
   $('chSub').textContent = (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
@@ -945,7 +968,11 @@ function addHist(i){
   const li=document.createElement('li');
   const d=new Date(i.ts), today=new Date().toDateString()===d.toDateString();
   const time=(today?'':d.toLocaleDateString('lt-LT',{month:'2-digit',day:'2-digit'})+' ')+d.toLocaleTimeString('lt-LT',{hour:'2-digit',minute:'2-digit'});
-  if (i.timer){
+  if (i.meet){
+    li.className='cmd';
+    li.innerHTML=`<span class="who">🚩 ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)} ${i.meet==='clear'?'pašalino':'pažymėjo'}</small></span><span class="t">${time}</span>`;
+    li.style.cursor='pointer'; li.onclick=()=>openMap();
+  } else if (i.timer){
     li.className='cmd';
     const what = i.timer==='stop' ? 'sustabdė laikmatį' : (i.timer==='extend'?'pratęsė iki ':'nustatė iki ')+hhmm(i.end);
     li.innerHTML=`<span class="who">⏰ ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)} ${what}</small></span><span class="t">${time}</span>`;
@@ -1019,7 +1046,7 @@ $('mapBtn').onclick = () => openMap();
 // ----- siuntimas -----
 function sendLoc(force){
   const st=shareState();
-  if (!st){ stopGeo(); return; }
+  if (!st) return;
   if (!myPos || !cur || !ws || ws.readyState!==1) return;
   const moved = lastLocSent ? distM(lastLocSent, myPos) : 1e9;
   if (!force && lastLocSent && moved < 15 && Date.now()-lastLocSent.at < 60000) return;  // nejudant – kas minutę
@@ -1032,19 +1059,24 @@ function startGeo(){
   if (!('geolocation' in navigator)){ toast('Šis telefonas neleidžia nustatyti vietos'); return; }
   geoWatch = navigator.geolocation.watchPosition(p=>{
     myPos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy};
-    sendLoc(false); if (map && !$('mapView').classList.contains('hidden')) renderMap();
+    sendLoc(false); renderMeetCard(); if (map && !$('mapView').classList.contains('hidden')) renderMap();
   }, e=>{
     if (e.code===1){ // leidimas atmestas
       store.del(shareKey()); stopGeo(); renderMapBtn();
       toast(NATIVE && !Native311.locationOk ? 'Atnaujink programėlę (mėlyna juosta viršuje), kad galėtum rodyti vietą' : 'Leisk programėlei naudoti vietą');
     }
   }, {enableHighAccuracy:true, maximumAge:10000, timeout:30000});
-  stopGeo.iv = setInterval(()=>{ if (!shareState()){ stopSharing(true); } else sendLoc(false); }, 15000);
+  stopGeo.iv = setInterval(()=>{ if (sharingWas && !shareState()) stopSharing(true); else sendLoc(false); }, 15000);
 }
 function stopGeo(){ if (geoWatch!==null){ navigator.geolocation.clearWatch(geoWatch); geoWatch=null; } clearInterval(stopGeo.iv); lastLocSent=null; }
+let sharingWas=false;
+// vieta sekama, jei ją rodai kitiems arba yra susitikimo vieta (tada tik atstumui skaičiuoti – niekam nesiunčiama)
+function ensureGeo(){ if (shareState() || (meet && geoGranted) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
+let geoGranted=false;
+try{ navigator.permissions && navigator.permissions.query({name:'geolocation'}).then(p=>{ geoGranted = p.state==='granted'; p.onchange=()=>{ geoGranted=p.state==='granted'; }; }).catch(()=>{}); }catch{}
 function startSharing(hours){
   const until = hours ? Date.now()+hours*3600000 : 0;
-  store.set(shareKey(), JSON.stringify({until}));
+  store.set(shareKey(), JSON.stringify({until})); sharingWas=true;
   if (NATIVE && Native311.requestLocation) try{ Native311.requestLocation(); }catch{}
   startGeo(); renderMapBtn();
   if (myPos) sendLoc(true);
@@ -1052,10 +1084,10 @@ function startSharing(hours){
 }
 function stopSharing(expired){
   const had = !!store.get(shareKey(),null);
-  store.del(shareKey()); stopGeo(); wsSend({t:'locStop'}); renderMapBtn();
+  store.del(shareKey()); sharingWas=false; wsSend({t:'locStop'}); renderMapBtn(); ensureGeo();
   if (had) toast(expired ? '📍 Vietos rodymo laikas baigėsi' : '📍 Vietos rodymas išjungtas');
 }
-function resumeSharing(){ if (shareState()){ startGeo(); setTimeout(()=>sendLoc(true), 1500); } renderMapBtn(); }
+function resumeSharing(){ if (shareState()){ sharingWas=true; startGeo(); setTimeout(()=>sendLoc(true), 1500); } else ensureGeo(); renderMapBtn(); }
 function pauseSharing(){ if (shareState()) wsSend({t:'locStop'}); stopGeo(); }
 
 $('shareBtn').onclick = () => {
@@ -1086,14 +1118,98 @@ async function openMap(){
   if (!map){
     map = L.map('map', {zoomControl:true, attributionControl:true}).setView([55.3, 23.9], 7);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19, attribution:'© OpenStreetMap', referrerPolicy:'strict-origin-when-cross-origin'}).addTo(map);
+    map.on('click', onMapClick);
   }
   mapFitted=false;
   setTimeout(()=>{ map.invalidateSize(); renderMap(); }, 60);
   if (!myPos && navigator.geolocation) navigator.geolocation.getCurrentPosition(p=>{ myPos={lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy}; renderMap(); }, ()=>{}, {enableHighAccuracy:true, timeout:15000, maximumAge:30000});
   clearInterval(openMap.iv); openMap.iv=setInterval(renderMapList, 5000);
+  ensureGeo();
 }
-function closeMap(){ $('mapView').classList.add('hidden'); clearInterval(openMap.iv); }
+function closeMap(){ $('mapView').classList.add('hidden'); clearInterval(openMap.iv); placing=false; $('placeHint').classList.add('hidden'); ensureGeo(); }
 $('mapBack').onclick = closeMap;
+
+// ----- susitikimo vieta -----
+let meet=null, meetLayer=null, meetLine=null, placing=false;
+const DIRS=['Š','ŠR','R','PR','P','PV','V','ŠV'];
+function bearing(a,b){ const r=Math.PI/180, y=Math.sin((b.lon-a.lon)*r)*Math.cos(b.lat*r),
+  x=Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos((b.lon-a.lon)*r);
+  return (Math.atan2(y,x)/r+360)%360; }
+function dirText(a,b){ const d=bearing(a,b); return ['↑','↗','→','↘','↓','↙','←','↖'][Math.round(d/45)%8] + ' ' + DIRS[Math.round(d/45)%8]; }
+function setMeet(m){ meet = m || null; renderMeetCard(); ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
+function renderMeetCard(){
+  const c=$('meetCard');
+  if (!meet || !cur){ c.classList.add('hidden'); return; }
+  c.classList.remove('hidden');
+  $('mtTitle').textContent = meet.title;
+  if (myPos){
+    const d=distM(myPos,meet);
+    $('mtInfo').textContent = (d<25 ? 'Tu jau čia' : fmtDist(d) + ' · ' + DIRS[Math.round(bearing(myPos,meet)/45)%8]) + ' · pažymėjo ' + meet.by;
+    $('mtArrow').style.transform = `rotate(${bearing(myPos,meet)}deg)`; $('mtArrow').style.opacity = 1;
+  } else {
+    $('mtInfo').textContent = 'Paspausk, kad matytum atstumą · pažymėjo ' + meet.by;
+    $('mtArrow').style.opacity = .3;
+  }
+}
+$('meetCard').onclick = () => openMap();
+function renderMeetOnMap(){
+  if (!map) return;
+  if (!meet){ if (meetLayer){ map.removeLayer(meetLayer); meetLayer=null; } if (meetLine){ map.removeLayer(meetLine); meetLine=null; } return; }
+  const ll=[meet.lat, meet.lon];
+  if (!meetLayer){
+    meetLayer = L.marker(ll, {icon: L.divIcon({className:'flagIcon', html:'🚩', iconSize:[30,30], iconAnchor:[6,28]}), zIndexOffset:1000})
+      .bindTooltip('', {permanent:true, direction:'right', offset:[14,-14], className:'flagLbl'}).addTo(map);
+  }
+  meetLayer.setLatLng(ll); meetLayer.setTooltipContent(esc(meet.title));
+  // tiesi linija nuo manęs iki susitikimo vietos su atstumu viduryje
+  if (myPos){
+    const pts=[[myPos.lat,myPos.lon], ll], mid=[(myPos.lat+meet.lat)/2, (myPos.lon+meet.lon)/2];
+    const txt = fmtDist(distM(myPos,meet)) + ' ' + dirText(myPos,meet);
+    if (!meetLine){
+      meetLine = L.polyline(pts, {color:'#3fa9f5', weight:4, dashArray:'10 8', opacity:.95}).addTo(map);
+      meetLine.bindTooltip('', {permanent:true, direction:'center', className:'distLbl'});
+    }
+    meetLine.setLatLngs(pts); meetLine.setTooltipContent(esc(txt)); meetLine.openTooltip(mid);
+  } else if (meetLine){ map.removeLayer(meetLine); meetLine=null; }
+}
+function meetModal(){
+  if (!cur) return;
+  const own=cur.owner, saved1=findSaved(cur.name)||{};
+  if (!own && !cur.timerCode){
+    openModal(`<h2>🚩 Susitikimo vieta</h2><p class="muted">Susitikimo vietą nustato kanalo kūrėjas. Jis gali nustatyti <b style="color:var(--text)">valdymo kodą</b> (⏰ laikmačio lange), kad ir kiti nariai galėtų ją dėti.</p>
+      ${meet?`<button class="btn alt" id="mGo">Rodyti žemėlapyje</button>`:''}<button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+    if ($('mGo')) $('mGo').onclick=()=>{ closeModal(); map && map.setView([meet.lat,meet.lon],17); };
+    return;
+  }
+  openModal(`<h2>🚩 Susitikimo vieta</h2>
+    ${meet?`<div class="meshCard" style="margin-bottom:12px;border-color:rgba(231,76,60,.5)"><span class="mi">🚩</span><span class="mt"><b>${esc(meet.title)}</b><small>${myPos?fmtDist(distM(myPos,meet))+' '+dirText(myPos,meet)+' · ':''}pažymėjo ${esc(meet.by)}</small></span></div>`:''}
+    <div class="field"><label>Pavadinimas</label><input id="mtName" maxlength="40" value="${esc(meet?meet.title:'Susitikimo vieta')}"></div>
+    ${own?'':`<div class="field"><label>Valdymo kodas</label><input id="mtCode" maxlength="32" value="${esc(saved1.timerCode||'')}"></div>`}
+    <button class="btn" id="mtPick">👆 Pažymėti žemėlapyje</button>
+    <button class="btn alt" id="mtHere">📍 Mano dabartinėje vietoje</button>
+    ${meet?'<button class="btn danger" id="mtClear">Pašalinti susitikimo vietą</button>':''}
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>
+    <div class="err" id="mErr"></div>`);
+  const code=()=>{ const c=$('mtCode'); if (!c) return undefined; upsertSaved({name:cur.name, timerCode:c.value}); return c.value; };
+  const title=()=>$('mtName').value.trim()||'Susitikimo vieta';
+  const send=(lat,lon,t,c)=>{ pending={meet:true}; wsSend({t:'meetSet', lat, lon, title:t, code:c}); };
+  $('mtPick').onclick=()=>{ placing={title:title(), code:code()}; closeModal(); $('placeHint').classList.remove('hidden'); };
+  $('mtHere').onclick=()=>{
+    const t=title(), c=code();
+    if (myPos) return send(myPos.lat, myPos.lon, t, c);
+    $('mErr').textContent='Ieškoma tavo vietos…';
+    navigator.geolocation.getCurrentPosition(p=>{ myPos={lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy}; send(myPos.lat, myPos.lon, t, c); },
+      ()=>{ $('mErr').textContent='Nepavyko nustatyti vietos – pažymėk žemėlapyje'; }, {enableHighAccuracy:true, timeout:15000});
+  };
+  if ($('mtClear')) $('mtClear').onclick=()=>{ pending={meet:true}; wsSend({t:'meetClear', code:code()}); };
+}
+$('meetBtn').onclick = meetModal;
+$('placeCancel').onclick = () => { placing=false; $('placeHint').classList.add('hidden'); };
+function onMapClick(e){
+  if (!placing) return;
+  const p=placing; placing=false; $('placeHint').classList.add('hidden');
+  wsSend({t:'meetSet', lat:e.latlng.lat, lon:e.latlng.lng, title:p.title, code:p.code});
+}
 
 function personColor(l){ return l.id===myLocId ? '#3fa9f5' : (sNow()-l.ts > 120000 ? '#7d8a99' : '#ff8a1f'); }
 function renderMap(){
@@ -1105,19 +1221,22 @@ function renderMap(){
   for (const p of pts){
     seen.add(p.id);
     const col = p.local ? '#3fa9f5' : personColor(p);
-    const label = p.id===myLocId ? myName+' (tu)' : p.name;
+    const isMe = p.local || p.id===myLocId;
+    const label = isMe ? myName+' (tu)' : p.name + (myPos ? ' · ' + fmtDist(distM(myPos,p)) : '');
     let mk = mapMarkers.get(p.id);
     if (!mk){
       mk = L.circleMarker([p.lat,p.lon], {radius:9, weight:3, color:'#fff', fillColor:col, fillOpacity:1})
         .bindTooltip(esc(label), {permanent:true, direction:'top', offset:[0,-10], className:'mapLbl'}).addTo(map);
       mapMarkers.set(p.id, mk);
-    } else { mk.setLatLng([p.lat,p.lon]); mk.setStyle({fillColor:col}); }
+    } else { mk.setLatLng([p.lat,p.lon]); mk.setStyle({fillColor:col}); mk.setTooltipContent(esc(label)); }
   }
   for (const [id, mk] of mapMarkers) if (!seen.has(id)){ map.removeLayer(mk); mapMarkers.delete(id); }
-  if (!mapFitted && pts.length){
+  renderMeetOnMap();
+  const all = pts.map(p=>[p.lat,p.lon]); if (meet) all.push([meet.lat, meet.lon]);
+  if (!mapFitted && all.length){
     mapFitted = true;
-    if (pts.length===1) map.setView([pts[0].lat, pts[0].lon], 16);
-    else map.fitBounds(L.latLngBounds(pts.map(p=>[p.lat,p.lon])), {padding:[40,40], maxZoom:17});
+    if (all.length===1) map.setView(all[0], 16);
+    else map.fitBounds(L.latLngBounds(all), {padding:[50,50], maxZoom:17});
   }
   renderMapList();
 }
@@ -1125,10 +1244,14 @@ function renderMapList(){
   const st=shareState();
   $('mapSub').textContent = (locs.length ? `Vietą rodo: ${locs.length}` : 'Niekas nerodo vietos') + (st ? ' · tu rodai' : '');
   const rows = locs.filter(l=>l.id!==myLocId).sort((a,b)=> myPos ? distM(myPos,a)-distM(myPos,b) : a.name.localeCompare(b.name));
-  $('mapList').innerHTML = (rows.length ? rows.map(l=>`<button class="pRow" data-id="${esc(l.id)}"><span class="pd" style="background:${personColor(l)}"></span>
-      <span class="pn">${esc(l.name)}</span><span class="pi">${myPos?fmtDist(distM(myPos,l))+' · ':''}${fmtAgo(l.ts)}</span></button>`).join('')
+  const meetRow = meet ? `<button class="pRow meet" data-meet="1"><span style="font-size:18px">🚩</span><span class="pn">${esc(meet.title)}</span>
+      <span class="pi">${myPos ? fmtDist(distM(myPos,meet))+' '+dirText(myPos,meet) : 'įjunk vietą atstumui'}</span></button>` : '';
+  $('mapList').innerHTML = meetRow + (rows.length ? rows.map(l=>`<button class="pRow" data-id="${esc(l.id)}"><span class="pd" style="background:${personColor(l)}"></span>
+      <span class="pn">${esc(l.name)}</span><span class="pi">${myPos?fmtDist(distM(myPos,l))+' nuo tavęs · ':''}${meet?'🚩 '+fmtDist(distM(l,meet))+' · ':''}${fmtAgo(l.ts)}</span></button>`).join('')
     : `<p class="muted" style="text-align:center">Kiti nariai dar nerodo savo vietos.<br>Paprašyk jų paspausti <b style="color:var(--text)">📍 Rodyti mane</b>.</p>`);
-  $('mapList').querySelectorAll('.pRow').forEach(b=>b.onclick=()=>{ const l=locs.find(x=>x.id===b.dataset.id); if (l && map) map.setView([l.lat,l.lon], 17); });
+  $('mapList').querySelectorAll('.pRow').forEach(b=>b.onclick=()=>{
+    if (b.dataset.meet){ if (meet && map) map.setView([meet.lat,meet.lon], 17); return; }
+    const l=locs.find(x=>x.id===b.dataset.id); if (l && map) map.setView([l.lat,l.lon], 17); });
   renderMapBtn();
 }
 
@@ -1183,10 +1306,10 @@ function timerModal(){
     <div class="row2"><div class="field"><label>Valandos</label><input id="tH" type="number" min="0" max="168" inputmode="numeric" placeholder="0"></div>
       <div class="field"><label>Minutės</label><input id="tM" type="number" min="0" max="59" inputmode="numeric" placeholder="0"></div></div>
     <div class="field"><label>Arba iki valandos</label><input id="tAt" type="time"></div>
-    ${own?'':`<div class="field"><label>Laikmačio kodas</label><input id="tCode" maxlength="32" value="${esc(saved1.timerCode||'')}"></div>`}
+    ${own?'':`<div class="field"><label>Valdymo kodas</label><input id="tCode" maxlength="32" value="${esc(saved1.timerCode||'')}"></div>`}
     <button class="btn" id="tGo">▶ Paleisti</button>`}
-    ${own?`<div class="sec" style="margin-top:16px"><span>Laikmačio kodas nariams</span></div>
-      <p class="muted" style="margin-top:0;font-size:13px">${cur.timerCode?'Kodas nustatytas: jį žinantys nariai gali valdyti laikmatį.':'Kodas nenustatytas: laikmatį valdo tik kūrėjai.'}</p>
+    ${own?`<div class="sec" style="margin-top:16px"><span>Valdymo kodas nariams</span></div>
+      <p class="muted" style="margin-top:0;font-size:13px">${cur.timerCode?'Kodas nustatytas: jį žinantys nariai gali valdyti laikmatį ir susitikimo vietą.':'Kodas nenustatytas: laikmatį ir susitikimo vietą valdo tik kūrėjai.'}</p>
       <div class="row2"><input id="tNewCode" maxlength="32" placeholder="naujas kodas"><button class="btn alt" id="tSaveCode" style="margin:0">Išsaugoti</button></div>
       ${cur.timerCode?'<button class="btn alt" id="tClearCode" style="margin-top:8px">Išjungti kodą</button>':''}`:''}
     <button class="btn alt" onclick="closeModal()" style="margin-top:10px">Uždaryti</button>
@@ -1209,7 +1332,7 @@ function timerModal(){
     if (min<1){ $('mErr').textContent='Pasirink trukmę arba valandą'; return; }
     send({t:'timerSet', title, minutes:min});
   };
-  if ($('tSaveCode')) $('tSaveCode').onclick=()=>{ const c=$('tNewCode').value.trim(); if (c.length<4){ $('mErr').textContent='Kodas bent 4 simboliai'; return; } wsSend({t:'timerCode', code:c}); toast('Laikmačio kodas išsaugotas'); };
+  if ($('tSaveCode')) $('tSaveCode').onclick=()=>{ const c=$('tNewCode').value.trim(); if (c.length<4){ $('mErr').textContent='Kodas bent 4 simboliai'; return; } wsSend({t:'timerCode', code:c}); toast('Valdymo kodas išsaugotas'); };
   if ($('tClearCode')) $('tClearCode').onclick=()=>{ wsSend({t:'timerCode', code:''}); toast('Kodas išjungtas'); };
 }
 $('timerCard').onclick = () => timerModal();

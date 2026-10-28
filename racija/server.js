@@ -84,6 +84,7 @@ function prune() {
   let changed = false;
   for (const ch of Object.values(db.channels)) {
     if (ch.timer && ch.timer.end < Date.now() - 3600000) { ch.timer = null; changed = true; }
+    if (ch.meet && ch.meet.ts < Date.now() - 24 * 3600000) { ch.meet = null; changed = true; }
     const keep = [];
     for (const h of ch.history) { if (h.ts < cut) { rmAudio(h.id); changed = true; } else keep.push(h); }
     ch.history = keep;
@@ -276,7 +277,7 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, now: Date.now(), locId: locId(ws), locs: locList(rt(name)) });
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, meet: db.channels[name].meet || null, now: Date.now(), locId: locId(ws), locs: locList(rt(name)) });
   presence(name);
 }
 
@@ -384,13 +385,37 @@ wss.on('connection', (ws, req) => {
         if (c && c.locs.delete(locId(ws))) broadcastLocs(ws.chan);
         return;
       }
+      case 'meetSet':
+      case 'meetClear': {
+        if (!ch) return;
+        if (!canManage(ws)) {
+          if (!ch.timerCode) return err(ws, 'notimerperm', 'Susitikimo vietą nustato kanalo kūrėjas. Paprašyk jo valdymo kodo.');
+          if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
+          if (!m.code || !checkCode(String(m.code), ch)) return failAuth(ws, 'badcode', 'Neteisingas valdymo kodas');
+        }
+        const now = Date.now();
+        let item;
+        if (m.t === 'meetClear') {
+          if (!ch.meet) return;
+          item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: ch.meet.title, meet: 'clear' };
+          ch.meet = null;
+        } else {
+          const lat = Number(m.lat), lon = Number(m.lon);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return err(ws, 'badplace', 'Netinkama vieta');
+          const title = String(m.title || 'Susitikimo vieta').trim().slice(0, 40) || 'Susitikimo vieta';
+          ch.meet = { lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6, title, by: ws.user, ts: now };
+          item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: title, meet: 'set' };
+        }
+        pushHist(ch, item);
+        return broadcast(ws.chan, { t: 'meet', meet: ch.meet || null, item });
+      }
       case 'timerSet':
       case 'timerStop': {
         if (!ch) return;
         if (!canManage(ws)) {
-          if (!ch.timerCode) return err(ws, 'notimerperm', 'Laikmatį nustato kanalo kūrėjas. Paprašyk jo laikmačio kodo.');
+          if (!ch.timerCode) return err(ws, 'notimerperm', 'Laikmatį nustato kanalo kūrėjas. Paprašyk jo valdymo kodo.');
           if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
-          if (!m.code || !checkCode(String(m.code), ch)) return failAuth(ws, 'badcode', 'Neteisingas laikmačio kodas');
+          if (!m.code || !checkCode(String(m.code), ch)) return failAuth(ws, 'badcode', 'Neteisingas valdymo kodas');
         }
         const now = Date.now();
         let item;
@@ -414,7 +439,7 @@ wss.on('connection', (ws, req) => {
       }
       case 'timerCode': {
         if (!ch) return;
-        if (!canManage(ws)) return err(ws, 'notowner', 'Laikmačio kodą nustato tik kūrėjas');
+        if (!canManage(ws)) return err(ws, 'notowner', 'Valdymo kodą nustato tik kūrėjas');
         const code = String(m.code || '');
         if (!code) ch.timerCode = null;
         else {
@@ -586,8 +611,8 @@ app.get('/version', async (_, res) => {
 });
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.8', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  ok: true, version: '0.9', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
 }));
 
-server.listen(PORT, () => console.log(`311 VoiceCH v0.8: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.9: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
