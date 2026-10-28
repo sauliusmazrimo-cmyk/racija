@@ -134,6 +134,10 @@ input:focus{border-color:var(--accent)}
 #cmdChips{-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
 .cmdChip{flex:none;padding:12px 16px;border-radius:12px;border:1px solid rgba(255,138,31,.45);background:rgba(255,138,31,.12);
   color:var(--text);font-weight:700;font-size:15px;white-space:nowrap}
+.cmdChip{position:relative;overflow:hidden;touch-action:pan-x;user-select:none;-webkit-user-select:none}
+.cmdChip .cf{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(255,138,31,.55);pointer-events:none}
+.cmdChip.hold .cf{width:100%;transition:width .7s linear}
+.cmdChip .ct{position:relative}
 .cmdChip.edit{border-color:var(--line);background:var(--panel);color:var(--muted);font-weight:500}
 .cmdChip:active{transform:scale(.96)}
 #hist li.cmd .who{color:var(--accent2)}
@@ -1356,16 +1360,31 @@ const b64dec = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
 
 function renderCmdChips(){
   $('cmdChips').innerHTML = cmds.filter(c=>!c.alarm).map(c=>
-    `<button class="cmdChip" data-id="${esc(c.id)}">${c.audio?'🎙️ ':''}${esc(c.text)}</button>`).join('')
+    `<button class="cmdChip" data-id="${esc(c.id)}"><span class="cf"></span><span class="ct">${c.audio?'🎙️ ':''}${esc(c.text)}</span></button>`).join('')
     + `<button class="cmdChip edit" id="cmdEdit">✎ Komandos</button>`;
   $('stopBtn').querySelector('b').textContent = '🚨 ' + stopCmd().text.toUpperCase();
 }
 $('cmdChips').addEventListener('click', e=>{
   if (e.target.closest('#cmdEdit')){ cmdEditor(); return; }
-  if (e.target.closest('#cmdTimer')){ timerModal(); return; }
-  const b=e.target.closest('.cmdChip[data-id]'); if(!b) return;
-  const c=cmds.find(x=>x.id===b.dataset.id); if(c) sendCmd(c);
+  if (e.target.closest('.cmdChip[data-id]')) flash('Laikyk komandos mygtuką, kol užsipildys');
 });
+// komandos siunčiamos tik palaikius ~0,7 s (kad nepasispaustų netyčia); slenkant eilutę – atšaukiama
+(()=>{
+  let tm=null, btn=null, x0=0, y0=0, sent=false;
+  const cancel=()=>{ if (tm){ clearTimeout(tm); tm=null; } if (btn) btn.classList.remove('hold'); btn=null; };
+  const bar=$('cmdChips');
+  bar.addEventListener('pointerdown', e=>{
+    const b=e.target.closest('.cmdChip[data-id]'); if (!b) return;
+    cancel(); btn=b; x0=e.clientX; y0=e.clientY; sent=false;
+    b.classList.add('hold'); vib(15);
+    tm=setTimeout(()=>{ tm=null; const c=cmds.find(x=>x.id===b.dataset.id); b.classList.remove('hold'); btn=null; sent=true; if (c) sendCmd(c); }, 700);
+  });
+  bar.addEventListener('pointermove', e=>{ if (btn && (Math.abs(e.clientX-x0)>12 || Math.abs(e.clientY-y0)>12)) cancel(); });
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>bar.addEventListener(ev, cancel));
+  bar.addEventListener('contextmenu', e=>e.preventDefault());
+  // paspaudimas (click) po sėkmingo siuntimo neturi rodyti patarimo
+  bar.addEventListener('click', e=>{ if (sent){ e.stopImmediatePropagation(); sent=false; } }, true);
+})();
 
 // bendras komandos id: 4 simboliai = minutė (base36), 2 = atsitiktiniai. Pagal jį šalinami dublikatai ir senos žinutės.
 function newCid(){
