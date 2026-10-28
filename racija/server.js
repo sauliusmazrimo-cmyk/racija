@@ -159,6 +159,13 @@ app.use((req, res, next) => {
   });
   next();
 });
+// kvietimo nuoroda: /join?c=kanalas&k=slaptažodis (Android programėlė ją atidaro pati)
+app.get('/join', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+const APK_SHA256 = process.env.APK_SHA256 || '2A:08:02:BA:C0:B5:4C:0D:72:E4:88:46:6A:1F:D1:47:50:0A:F8:C7:02:A9:2F:5C:BC:69:99:E6:69:6B:36:70';
+app.get('/.well-known/assetlinks.json', (_, res) => res.json([{
+  relation: ['delegate_permission/common.handle_all_urls'],
+  target: { namespace: 'android_app', package_name: 'lt.voicech311', sha256_cert_fingerprints: [APK_SHA256] }
+}]));
 app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 32 * 1024 });
@@ -226,7 +233,7 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, ticket: ws.ticket, history: db.channels[name].history });
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history });
   presence(name);
 }
 
@@ -295,7 +302,7 @@ wss.on('connection', (ws, req) => {
         if (String(m.password || '').length < MIN_PW) return err(ws, 'shortpass', `Slaptažodis turi būti bent ${MIN_PW} simbolių`);
         if (db.channels[name]) return err(ws, 'exists', 'Toks kanalas jau yra. Pasirink kitą pavadinimą arba prisijunk.');
         setUser(ws, m);
-        db.channels[name] = { owners: [ws.tokenHash], created: Date.now(), history: [] };
+        db.channels[name] = { owners: [ws.tokenHash], created: Date.now(), history: [], public: !!m.public };
         setPw(db.channels[name], m.password);
         saveDb();
         return attach(ws, name);
@@ -312,6 +319,17 @@ wss.on('connection', (ws, req) => {
       }
       case 'leave':
         return leave(ws);
+
+      // ----- bendras grupių sąrašas (tik pavadinimai; įeiti reikia slaptažodžio) -----
+      case 'publicList':
+        return send(ws, { t: 'publicList', channels: Object.entries(db.channels).filter(([, c]) => c.public)
+          .map(([name]) => ({ name, online: live.has(name) ? live.get(name).clients.size : 0 }))
+          .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) });
+      case 'setPublic':
+        if (!ch) return;
+        if (!canManage(ws)) return err(ws, 'notowner', 'Keisti gali tik kūrėjas');
+        ch.public = !!m.on; saveDb();
+        return send(ws, { t: 'publicSet', on: ch.public });
 
       // ----- kalbėjimas -----
       case 'start': {
@@ -454,8 +472,8 @@ app.get('/audio/:id', (req, res) => {
 app.get('/apk', (_, res) => res.redirect(process.env.APK_URL || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/android-latest/311VoiceCH.apk'));
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.5', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  ok: true, version: '0.6', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
 }));
 
-server.listen(PORT, () => console.log(`311 VoiceCH v0.5: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.6: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));

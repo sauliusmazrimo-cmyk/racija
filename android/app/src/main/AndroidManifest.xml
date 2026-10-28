@@ -38,12 +38,12 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- kvietimo nuorodos atidaromos programėlėje -->
-            <intent-filter>
+            <!-- kvietimo nuorodos (/join?c=..&k=..) atidaromos tiesiai programėlėje (Android App Links) -->
+            <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="racija-production.up.railway.app" />
+                <data android:scheme="https" android:host="racija-production.up.railway.app" android:pathPrefix="/join" />
             </intent-filter>
         </activity>
 

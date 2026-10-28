@@ -248,6 +248,15 @@ public class MainActivity extends Activity {
             VoiceService.alarm(text, from); // dublikatai jau atmesti per markSeen
         }
         @JavascriptInterface public void audioIdle() { VoiceService.audioIdle(); }
+        /** Iškarpinės tekstas (kviečiama tik paspaudus „Įklijuoti“). */
+        @JavascriptInterface public String clipboardText() {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm == null || !cm.hasPrimaryClip() || cm.getPrimaryClip().getItemCount() == 0) return "";
+                CharSequence t = cm.getPrimaryClip().getItemAt(0).coerceToText(MainActivity.this);
+                return t == null ? "" : t.toString();
+            } catch (Exception e) { return ""; }
+        }
         /** true, jei id dar nematytas (ir dabar pažymėtas). */
         @JavascriptInterface public boolean markSeen(String id) { VoiceService s = VoiceService.inst; return s == null || s.markSeen(id); }
         @JavascriptInterface public boolean meshSend(String text, String id) { return VoiceService.meshSend(text, id); }

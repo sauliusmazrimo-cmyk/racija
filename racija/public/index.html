@@ -167,6 +167,9 @@ input:focus{border-color:var(--accent)}
 #meshDot.off{display:none}
 #meshDot.warn{opacity:.35;filter:grayscale(1)}
 select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:17px}
+.check{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);margin-bottom:14px;color:var(--text);font-size:15px}
+.check input{width:22px;height:22px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+.check small{display:block;color:var(--muted);font-size:12px;margin-top:3px}
 .apkBanner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;margin-bottom:10px;text-decoration:none;
   background:rgba(255,138,31,.1);border:1px solid rgba(255,138,31,.35);color:var(--text);font-size:22px}
 .apkBanner b{display:block;font-size:15px}
@@ -408,7 +411,7 @@ function onMsg(ev){
       const src = pending || cur || {};
       const pw = src.pw ?? prev.pw ?? null;
       const viaAdmin = !!src.viaAdmin;
-      cur = { name:m.channel, pw, viaAdmin, owner:m.owner, ticket:m.ticket };
+      cur = { name:m.channel, pw, viaAdmin, owner:m.owner, ticket:m.ticket, public:!!m.public };
       me.owner = m.owner; me.admin = m.admin;
       upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, last:Date.now() });
       if (pending){ closeModal(); }
@@ -479,6 +482,16 @@ function onMsg(ev){
       saved = saved.filter(c=>c.name!==m.channel); saveList();
       cur=null; show('scrList'); renderList(); toast(`Kanalas #${m.channel} ištrintas`); break;
     }
+    case 'publicList': {
+      const box=$('pubList'); if (!box) break;
+      const mine=new Set(saved.map(c=>c.name));
+      box.innerHTML = m.channels.length ? m.channels.map(c=>`<button class="menuItem pubCh" data-n="${esc(c.name)}">${mine.has(c.name)?'✅':'🔒'}<span>#${esc(c.name)}<small>${c.online?`● ${c.online} prisijungę`:'niekas neprisijungęs'}${mine.has(c.name)?' · jau tavo sąraše':''}</small></span></button>`).join('')
+        : 'Bendrame sąraše grupių nėra. Įvesk pavadinimą ir slaptažodį arba įklijuok kvietimą.';
+      box.classList.toggle('muted', !m.channels.length);
+      box.querySelectorAll('.pubCh').forEach(b=>b.onclick=()=>{ $('mName').value=b.dataset.n; const s=findSaved(b.dataset.n); $('mPw').value=s&&s.pw||''; $('mPw').focus(); });
+      break;
+    }
+    case 'publicSet': if (cur){ cur.public=m.on; toast(m.on?'Grupė rodoma bendrame sąraše':'Grupė paslėpta iš bendro sąrašo'); } break;
     case 'passwordChanged': {
       if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
       break;
@@ -507,7 +520,7 @@ function renderList(){
   $('hello').textContent = `Labas, ${myName}`;
   const ul=$('chList');
   if (!saved.length){
-    ul.innerHTML = `<div class="emptyBox"><b>Dar nėra kanalų</b>Sukurk naują grupę arba prisijunk prie esamos su pavadinimu ir slaptažodžiu.</div>`;
+    ul.innerHTML = `<div class="emptyBox"><b>Dar nėra kanalų</b>Spausk <b style="display:inline;color:var(--accent)">Prisijungti</b>: ten matysi bendrą grupių sąrašą arba galėsi įklijuoti draugo kvietimą. Arba sukurk savo grupę.</div>`;
     return;
   }
   ul.innerHTML = saved.map(c=>`
@@ -607,6 +620,7 @@ $('newChBtn').onclick = () => {
   openModal(`<h2>Nauja grupė</h2>
     <div class="field"><label>Kanalo pavadinimas</label><input id="mName" maxlength="32" placeholder="pvz. planavimas-1"></div>
     <div class="field"><label>Slaptažodis (bent 6 simboliai)</label><input id="mPw" maxlength="64" placeholder="kurį žinos nariai"></div>
+    <label class="check"><input type="checkbox" id="mPub" checked> <span>Rodyti bendrame grupių sąraše<small>Kiti matys pavadinimą lange „Prisijungti“, bet įeiti galės tik žinodami slaptažodį</small></span></label>
     <button class="btn" id="mOk">Sukurti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
     <div class="err" id="mErr"></div>`);
   $('mOk').onclick = async () => {
@@ -616,17 +630,39 @@ $('newChBtn').onclick = () => {
     if (!(await audioOk())) return;
     $('mOk').disabled=true; $('mErr').textContent='';
     pending={pw:p}; wantOpen=true;
-    wsSend({t:'create', name:myName, channel:n, password:p, token});
+    wsSend({t:'create', name:myName, channel:n, password:p, token, public:$('mPub').checked});
   };
 };
 
+// kvietimo nuoroda: /join?c=..&k=.. (senos /?c=.. irgi tinka)
+function parseInvite(text){
+  const m = String(text||'').match(/https?:\/\/\S+/); if (!m) return null;
+  try{ const u=new URL(m[0]); const c=u.searchParams.get('c'); return c ? {c, k:u.searchParams.get('k')||''} : null; }catch{ return null; }
+}
+async function readClipboard(){
+  if (NATIVE && Native311.clipboardText) try{ return Native311.clipboardText(); }catch{}
+  try{ return await navigator.clipboard.readText(); }catch{ return ''; }
+}
+
 function joinModal(prefName='', prefPw=''){
   openModal(`<h2>Prisijungti prie grupės</h2>
-    <div class="field"><label>Kanalo pavadinimas</label><input id="mName" maxlength="32" value="${esc(prefName)}" placeholder="pvz. planavimas-1"></div>
+    <button class="btn alt" id="mPaste">📋 Įklijuoti kvietimo nuorodą</button>
+    <div class="sec" style="margin-top:14px"><span>Grupės</span></div>
+    <div id="pubList" class="muted" style="margin-bottom:10px">Kraunama…</div>
+    <div class="field"><label>Kanalo pavadinimas (arba kvietimo nuoroda)</label><input id="mName" maxlength="300" value="${esc(prefName)}" placeholder="pvz. planavimas-1"></div>
     <div class="field"><label>Slaptažodis</label><input id="mPw" maxlength="64" value="${esc(prefPw)}"></div>
     <button class="btn" id="mOk">Prisijungti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
     <div class="err" id="mErr"></div>`);
+  wantOpen=true; wsSend({t:'publicList'});
+  const fill = inv => { $('mName').value=inv.c; $('mPw').value=inv.k; };
+  $('mName').addEventListener('input', e => { const inv=parseInvite(e.target.value); if (inv) fill(inv); });
+  $('mPaste').onclick = async () => {
+    const inv = parseInvite(await readClipboard());
+    if (!inv){ $('mErr').textContent='Iškarpinėje nėra kvietimo nuorodos. Nukopijuok ją iš žinutės ir bandyk dar kartą.'; return; }
+    fill(inv); $('mErr').textContent=''; $('mOk').click();
+  };
   $('mOk').onclick = async () => {
+    const inv=parseInvite($('mName').value); if (inv) fill(inv);
     const n=$('mName').value.trim(), p=$('mPw').value;
     if (!n){ $('mErr').textContent='Įvesk pavadinimą'; return; }
     if (!(await audioOk())) return;
@@ -699,7 +735,7 @@ $('inviteBtn').onclick = () => {
     $('mOk').onclick = () => { $('menuBtn').click(); $('miPw').click(); };
     return;
   }
-  const link = `${location.origin}/?c=${encodeURIComponent(cur.name)}&k=${encodeURIComponent(cur.pw)}`;
+  const link = `${location.origin}/join?c=${encodeURIComponent(cur.name)}&k=${encodeURIComponent(cur.pw)}`;
   let qrSvg='';
   try{ const q=qrcode(0,'M'); q.addData(link); q.make(); qrSvg=q.createSvgTag({cellSize:5,margin:2,scalable:true}); }catch{}
   openModal(`<h2>Pakviesti į #${esc(cur.name)}</h2>
@@ -726,6 +762,7 @@ $('menuBtn').onclick = () => {
     ${NATIVE?`<button class="menuItem" id="miMesh">📡<span>LoRa (Meshtastic): ${esc(MESH_LABEL[meshState.state]||'')}<small>STOP ir komandos be interneto</small></span></button>`:''}
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
     ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
+    <button class="menuItem" id="miPub">${cur.public?'👁️':'🙈'}<span>Bendrame sąraše: <b style="color:${cur.public?'var(--ok)':'var(--muted)'}">${cur.public?'RODOMA':'PASLĖPTA'}</b><small>Ar kiti mato šios grupės pavadinimą lange „Prisijungti“</small></span></button>
     <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
     <button class="menuItem red" id="miDel">⛔<span>Ištrinti kanalą<small>Visi nariai bus atjungti</small></span></button>`:''}
     <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
@@ -743,6 +780,7 @@ $('menuBtn').onclick = () => {
   if (!o) return;
   $('miAll').onclick = () => confirmModal('Išvalyti istoriją visiems?','Visų narių įrašai šiame kanale bus negrįžtamai ištrinti.','Išvalyti', ()=>wsSend({t:'clear'}));
   $('miDel').onclick = () => confirmModal(`Ištrinti #${esc(cur.name)}?`,'Kanalas, slaptažodis ir visi įrašai bus ištrinti, nariai atjungti.','Ištrinti kanalą', ()=>wsSend({t:'delete'}));
+  $('miPub').onclick = () => { wsSend({t:'setPublic', on:!cur.public}); closeModal(); };
   $('miPw').onclick = () => {
     openModal(`<h2>Naujas slaptažodis</h2>
       <div class="field"><label>Slaptažodis (bent 6 simboliai)</label><input id="mPw" maxlength="64"></div>
@@ -1160,7 +1198,8 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').cat
 let inviteData=null;
 (()=>{
   const q=new URLSearchParams(location.search);
-  if (q.get('c')){ inviteData={c:q.get('c'), k:q.get('k')||''}; history.replaceState(null,'',location.pathname); }
+  if (q.get('c')){ inviteData={c:q.get('c'), k:q.get('k')||''}; }
+  if (location.pathname!=='/' || location.search) history.replaceState(null,'','/');
   if (myName) afterName(); else show('scrName');
 })();
 </script>
