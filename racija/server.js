@@ -160,8 +160,13 @@ app.use((req, res, next) => {
   });
   next();
 });
-// kvietimo nuoroda: /join?c=kanalas&k=slaptažodis (Android programėlė ją atidaro pati)
-app.get('/join', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// sąsajos versija: įrašoma į puslapį, kad atidaryti telefonai pastebėtų naują versiją ir persikrautų
+const INDEX_RAW = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+const WEBVER = crypto.createHash('sha256').update(INDEX_RAW).update(fs.readFileSync(path.join(__dirname, 'public', 'sw.js'))).digest('hex').slice(0, 12);
+const INDEX_HTML = INDEX_RAW.replace('__WEBVER__', WEBVER);
+const sendIndex = (_, res) => { res.set('Cache-Control', 'no-cache'); res.type('html').send(INDEX_HTML); };
+app.get(['/', '/index.html', '/join'], sendIndex); // kvietimo nuoroda: /join?c=kanalas&k=slaptažodis
+app.get('/webver', (_, res) => res.set('Cache-Control', 'no-store').json({ v: WEBVER }));
 const APK_SHA256 = process.env.APK_SHA256 || '2A:08:02:BA:C0:B5:4C:0D:72:E4:88:46:6A:1F:D1:47:50:0A:F8:C7:02:A9:2F:5C:BC:69:99:E6:69:6B:36:70';
 app.get('/.well-known/assetlinks.json', (_, res) => res.json([{
   relation: ['delegate_permission/common.handle_all_urls'],

@@ -653,7 +653,7 @@ function renderAdmin(list){
 }
 
 async function audioOk(){
-  try{ await initAudio(); return true; }
+  try{ await Promise.race([initAudio(), new Promise(r=>setTimeout(r,1500))]); return true; }
   catch(e){ toast('Leisk naudoti mikrofoną (reikia HTTPS)'); return false; }
 }
 
@@ -1351,6 +1351,35 @@ if (NATIVE){
   document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') checkUpdate(); });
 }
 
+// ---------- automatinis sąsajos atnaujinimas ----------
+const WEBVER = '__WEBVER__';
+let reloadWanted = false;
+const idle = () => !talking && !recBuf && !ptt.classList.contains('down') && !modalOpen()
+  && $('alarm').classList.contains('hidden') && !(rxFrom);
+function doReload(){
+  if (cur && scrVisible('scrChan')) store.set('vc_rejoin', JSON.stringify({name:cur.name, at:Date.now()}));
+  location.reload();
+}
+async function checkWebVer(){
+  if (WEBVER.startsWith('__')) return;
+  try{
+    const r = await (await fetch('/webver',{cache:'no-store'})).json();
+    if (r.v && r.v !== WEBVER){ reloadWanted = true; if (idle()) doReload(); }
+  }catch{}
+}
+setInterval(()=>{ if (reloadWanted && idle()) doReload(); }, 3000);
+setInterval(checkWebVer, 2*60*1000);
+setTimeout(checkWebVer, 5000);
+document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') checkWebVer(); });
+function autoRejoin(){
+  let r=null; try{ r=JSON.parse(store.get('vc_rejoin','null')); }catch{}
+  store.del('vc_rejoin');
+  if (!r || Date.now()-r.at > 60000 || !myName) return;
+  const c=findSaved(r.name); if (!c) return;
+  const li=[...document.querySelectorAll('#chList li[data-n]')].find(x=>x.dataset.n===c.name);
+  if (li) li.click();
+}
+
 // sąsaja veikia ir be interneto (išsaugoma telefone)
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
@@ -1360,7 +1389,7 @@ let inviteData=null;
   const q=new URLSearchParams(location.search);
   if (q.get('c')){ inviteData={c:q.get('c'), k:q.get('k')||''}; }
   if (location.pathname!=='/' || location.search) history.replaceState(null,'','/');
-  if (myName) afterName(); else show('scrName');
+  if (myName){ afterName(); if (!inviteData) setTimeout(autoRejoin, 300); } else show('scrName');
 })();
 </script>
 </body>
