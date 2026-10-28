@@ -1,1 +1,1 @@
-Programėlė pati praneša apie naujas versijas ir jas įdiegia. Kvietimo nuorodos atsidaro programėlėje.
+Vietos rodymas narių žemėlapyje veikia ir užrakinus telefoną.

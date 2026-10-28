@@ -33,6 +33,19 @@ public class MainActivity extends Activity {
     private PermissionRequest pendingWebPermission;
     private static final int REQ_PERMS = 31;
     private static final int REQ_BT = 32;
+    private static final int REQ_LOC = 33;
+    private android.webkit.GeolocationPermissions.Callback pendingGeo;
+    private String pendingGeoOrigin;
+
+    private boolean hasLocation() {
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Leidus vietą – fono paslauga papildomai pažymima kaip „vieta“, kad GPS veiktų užrakinus ekraną. */
+    private void refreshServiceTypes() {
+        try { startForegroundService(new Intent(this, VoiceService.class).setAction(VoiceService.ACTION_UPDATE_TYPES)); } catch (Exception ignored) {}
+    }
 
     /** WebView, kuris nesužino, kad ekranas užrakintas: puslapis neužmigdomas ir neribojamas. */
     public static class AlwaysVisibleWebView extends WebView {
@@ -58,6 +71,7 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        s.setGeolocationEnabled(true);
         s.setUserAgentString(s.getUserAgentString() + " VoiceCH311Android/" + BuildConfig.VERSION_NAME);
 
         web.addJavascriptInterface(new Bridge(), "Native311");
@@ -78,6 +92,15 @@ public class MainActivity extends Activity {
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, android.webkit.GeolocationPermissions.Callback callback) {
+                runOnUiThread(() -> {
+                    if (hasLocation()) callback.invoke(origin, true, false);
+                    else { pendingGeo = callback; pendingGeoOrigin = origin;
+                        requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOC); }
+                });
+            }
+
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
                 runOnUiThread(() -> {
@@ -114,6 +137,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQ_LOC) {
+            if (pendingGeo != null) { pendingGeo.invoke(pendingGeoOrigin, hasLocation(), false); pendingGeo = null; }
+            if (hasLocation()) refreshServiceTypes();
+            return;
+        }
         if (requestCode == REQ_BT) {
             MeshLink m = mesh();
             if (m != null) meshStatus(m.info().toString());
@@ -254,6 +282,13 @@ public class MainActivity extends Activity {
             VoiceService.alarm(text, from); // dublikatai jau atmesti per markSeen
         }
         @JavascriptInterface public void audioIdle() { VoiceService.audioIdle(); }
+        @JavascriptInterface public boolean locationOk() { return hasLocation(); }
+        @JavascriptInterface public void requestLocation() {
+            runOnUiThread(() -> {
+                if (!hasLocation()) requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION}, REQ_LOC);
+                else refreshServiceTypes();
+            });
+        }
         @JavascriptInterface public void installUpdate(String url) { runOnUiThread(() -> Updater.start(MainActivity.this, url)); }
         /** Iškarpinės tekstas (kviečiama tik paspaudus „Įklijuoti“). */
         @JavascriptInterface public String clipboardText() {

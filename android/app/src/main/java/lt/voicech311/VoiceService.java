@@ -37,6 +37,7 @@ public class VoiceService extends Service {
 
     static final String CH = "voice";
     static final String ACTION_STOP = "lt.voicech311.STOP";
+    static final String ACTION_UPDATE_TYPES = "lt.voicech311.UPDATE_TYPES";
     static VoiceService inst;
     private static String status = "Paruošta";
 
@@ -63,14 +64,7 @@ public class VoiceService extends Service {
         al.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         nm.createNotificationChannel(al);
 
-        Notification n = build();
-        if (Build.VERSION.SDK_INT >= 30) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-        } else if (Build.VERSION.SDK_INT == 29) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
-        } else {
-            startForeground(1, n);
-        }
+        goForeground();
 
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VoiceCH311:ryšys");
@@ -306,8 +300,32 @@ public class VoiceService extends Service {
         if (s != null) s.getSystemService(NotificationManager.class).notify(1, s.build());
     }
 
+    /** Paslaugos tipai: mikrofonas + garsas, o jei leista – ir vieta (kad GPS veiktų užrakinus ekraną). */
+    private void goForeground() {
+        Notification n = build();
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                int types = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK;
+                if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                        || checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    types |= ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+                startForeground(1, n, types);
+            } else if (Build.VERSION.SDK_INT == 29) {
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK | ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(1, n);
+            }
+        } catch (Exception e) {
+            // jei vietos tipas neleidžiamas – be jo
+            if (Build.VERSION.SDK_INT >= 30)
+                startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE | ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            else startForeground(1, n);
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent != null && ACTION_UPDATE_TYPES.equals(intent.getAction())) { goForeground(); return START_NOT_STICKY; }
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             MainActivity a = MainActivity.instance;
             if (a != null) a.runOnUiThread(a::finishAndRemoveTask);

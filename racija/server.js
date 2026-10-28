@@ -142,7 +142,7 @@ const TICKET_GRACE_MS = 2 * 60 * 1000;
 setInterval(() => { const now = Date.now(); for (const [k, t] of tickets) if (t.until < now) tickets.delete(k); }, 60 * 1000);
 let connSeq = 0;
 function rt(name) {
-  if (!live.has(name)) live.set(name, { clients: new Set(), talker: null, current: null, timer: null });
+  if (!live.has(name)) live.set(name, { clients: new Set(), talker: null, current: null, timer: null, locs: new Map() });
   return live.get(name);
 }
 const isOwner = (w, ch) => !!ch && ch.owners.includes(w.tokenHash);
@@ -156,7 +156,7 @@ app.use((req, res, next) => {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
     'Strict-Transport-Security': 'max-age=31536000',
-    'Permissions-Policy': 'microphone=(self), camera=(), geolocation=()'
+    'Permissions-Policy': 'microphone=(self), camera=(), geolocation=(self)'
   });
   next();
 });
@@ -232,6 +232,30 @@ function uniqueName(ws, name) {
   ws.user = `${ws.user} (${i})`;
 }
 
+// ---------- narių vietos (tik atmintyje, tik to kanalo nariams; niekur nesaugoma) ----------
+const LOC_MAX_AGE = 15 * 60 * 1000;
+const locId = (w) => sha('loc:' + w.tokenHash).slice(0, 10);
+function locList(c) {
+  const now = Date.now();
+  return [...c.locs.entries()].filter(([, l]) => (!l.until || l.until > now) && now - l.ts < LOC_MAX_AGE)
+    .map(([id, l]) => ({ id, name: l.name, lat: l.lat, lon: l.lon, acc: l.acc, ts: l.ts, until: l.until }));
+}
+function broadcastLocs(name) {
+  const c = live.get(name); if (!c) return;
+  clearTimeout(c.locTimer);
+  const wait = 1000 - (Date.now() - (c.locSent || 0));
+  const go = () => { c.locSent = Date.now(); broadcast(name, { t: 'locs', list: locList(c), now: Date.now() }); };
+  if (wait <= 0) go(); else c.locTimer = setTimeout(go, wait); // ne dažniau nei kas 1 s
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const [name, c] of live) {
+    let changed = false;
+    for (const [k, l] of c.locs) if ((l.until && l.until <= now) || now - l.ts >= LOC_MAX_AGE) { c.locs.delete(k); changed = true; }
+    if (changed) broadcastLocs(name);
+  }
+}, 30 * 1000);
+
 // ---------- laikmatis ----------
 const timerView = (ch) => ch && ch.timer ? { title: ch.timer.title, start: ch.timer.start, end: ch.timer.end, by: ch.timer.by } : null;
 function checkCode(code, ch) {
@@ -252,7 +276,7 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, now: Date.now() });
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, now: Date.now(), locId: locId(ws), locs: locList(rt(name)) });
   presence(name);
 }
 
@@ -344,6 +368,22 @@ wss.on('connection', (ws, req) => {
         return send(ws, { t: 'publicList', channels: Object.entries(db.channels).filter(([, c]) => c.public)
           .map(([name]) => ({ name, online: live.has(name) ? live.get(name).clients.size : 0 }))
           .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) });
+      case 'loc': {
+        if (!ch) return;
+        const lat = Number(m.lat), lon = Number(m.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
+        const c = rt(ws.chan), now = Date.now();
+        const until = Number(m.until) > now ? Math.min(Number(m.until), now + 24 * 3600000) : null;
+        c.locs.set(locId(ws), { name: ws.user, lat: Math.round(lat * 1e6) / 1e6, lon: Math.round(lon * 1e6) / 1e6,
+          acc: Math.min(9999, Math.max(0, Math.round(Number(m.acc) || 0))), ts: now, until });
+        return broadcastLocs(ws.chan);
+      }
+      case 'locStop': {
+        if (!ws.chan) return;
+        const c = live.get(ws.chan);
+        if (c && c.locs.delete(locId(ws))) broadcastLocs(ws.chan);
+        return;
+      }
       case 'timerSet':
       case 'timerStop': {
         if (!ch) return;
@@ -546,8 +586,8 @@ app.get('/version', async (_, res) => {
 });
 
 app.get('/health', (_, res) => res.json({
-  ok: true, version: '0.7', channels: Object.keys(db.channels).length, clients: wss.clients.size,
+  ok: true, version: '0.8', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY
 }));
 
-server.listen(PORT, () => console.log(`311 VoiceCH v0.7: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
+server.listen(PORT, () => console.log(`311 VoiceCH v0.8: http://localhost:${PORT} (duomenys: ${DATA_DIR}, admin: ${ADMIN_KEY ? 'taip' : 'ne'})`));
