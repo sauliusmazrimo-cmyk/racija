@@ -861,7 +861,8 @@ $('menuBtn').onclick = () => {
     <button class="menuItem" id="miPub">${cur.public?'👁️':'🙈'}<span>Bendrame sąraše: <b style="color:${cur.public?'var(--ok)':'var(--muted)'}">${cur.public?'RODOMA':'PASLĖPTA'}</b><small>Ar kiti mato šios grupės pavadinimą lange „Prisijungti“</small></span></button>
     <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
     <button class="menuItem red" id="miDel">⛔<span>Ištrinti kanalą<small>Visi nariai bus atjungti</small></span></button>`:''}
-    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>
+    <p class="muted" style="text-align:center;font-size:12px;margin:10px 0 0">Sąsajos versija ${WEBVER.slice(0,6)}${NATIVE?' · programėlė '+esc(Native311.version()):''}</p>`);
   $('miNoisy').onclick = async () => {
     noisy=!noisy; store.set('vc_noisy', noisy?'1':'0');
     try{ await restartMic(); toast(noisy?'🎧 Triukšmingos aplinkos režimas įjungtas':'Įprastas režimas'); }catch{ toast('Nepavyko perjungti mikrofono'); }
@@ -1646,7 +1647,7 @@ if (NATIVE){
 const WEBVER = '__WEBVER__';
 let reloadWanted = false;
 const idle = () => !talking && !recBuf && !ptt.classList.contains('down') && !modalOpen() && $('mapView').classList.contains('hidden')
-  && $('alarm').classList.contains('hidden') && !(rxFrom);
+  && $('alarm').classList.contains('hidden') && !(talkerName && talkerName!==myName);
 function doReload(){
   if (cur && scrVisible('scrChan')) store.set('vc_rejoin', JSON.stringify({name:cur.name, at:Date.now()}));
   location.reload();
@@ -1655,10 +1656,11 @@ async function checkWebVer(){
   if (WEBVER.startsWith('__')) return;
   try{
     const r = await (await fetch('/webver',{cache:'no-store'})).json();
-    if (r.v && r.v !== WEBVER){ reloadWanted = true; if (idle()) doReload(); }
+    if (r.v && r.v !== WEBVER){ if (!reloadWanted) reloadWanted = Date.now(); if (idle()) doReload(); }
   }catch{}
 }
-setInterval(()=>{ if (reloadWanted && idle()) doReload(); }, 3000);
+setInterval(()=>{ if (!reloadWanted) return;
+  if (idle() || (Date.now()-reloadWanted > 10*60*1000 && !talking && !recBuf)) doReload(); }, 3000);
 setInterval(checkWebVer, 2*60*1000);
 setTimeout(checkWebVer, 5000);
 document.addEventListener('visibilitychange', ()=>{ if (document.visibilityState==='visible') checkWebVer(); });
