@@ -120,7 +120,10 @@ input:focus{border-color:var(--accent)}
 .adMeta{font-size:12px;margin:2px 0 10px}
 .adBtns{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
 .adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
-#licBar{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;padding:10px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);color:var(--fg);font:inherit;text-align:left}
+.coordList{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.coordRow{display:flex;align-items:center;gap:10px;width:100%;padding:9px 12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);font:inherit;text-align:left}
+.coordRow span{flex:0 0 96px;color:var(--muted);font-size:12px}.coordRow b{flex:1;font:600 14px ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.coordRow i{font-style:normal;opacity:.6}
+#licBar{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;padding:10px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:inherit;text-align:left}
 #licBar.bad{border-color:var(--busy);background:rgba(231,76,60,.15)}
 body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#meetCard,#timerCard,#users,#hist){opacity:.2;pointer-events:none;filter:grayscale(1)}
 #licBar b{display:block;font-size:15px}#licBar small{display:block;color:var(--muted);font-size:13px}
@@ -1304,6 +1307,114 @@ function renderMeetOnMap(){
     meetLine.setLatLngs(pts); meetLine.setTooltipContent(esc(txt)); meetLine.openTooltip(mid);
   } else if (meetLine){ map.removeLayer(meetLine); meetLine=null; }
 }
+// ---------- koordinatės: WGS84, LKS-94, UTM, MGRS ----------
+const GEO = (() => {
+  const R = Math.PI / 180;
+  const ELL = { wgs: [6378137, 1 / 298.257223563], grs: [6378137, 1 / 298.257222101] };
+  function tmFwd(lat, lon, lon0, k0, FE, FN, el) {
+    const [a, f] = ELL[el], e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+    const p = lat * R, s = Math.sin(p), c = Math.cos(p), t = Math.tan(p);
+    const N = a / Math.sqrt(1 - e2 * s * s), T = t * t, C = ep2 * c * c, A = (lon - lon0) * R * c;
+    const e4 = e2 * e2, e6 = e4 * e2;
+    const M = a * ((1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256) * p - (3 * e2 / 8 + 3 * e4 / 32 + 45 * e6 / 1024) * Math.sin(2 * p)
+      + (15 * e4 / 256 + 45 * e6 / 1024) * Math.sin(4 * p) - (35 * e6 / 3072) * Math.sin(6 * p));
+    const x = FE + k0 * N * (A + (1 - T + C) * A ** 3 / 6 + (5 - 18 * T + T * T + 72 * C - 58 * ep2) * A ** 5 / 120);
+    const y = FN + k0 * (M + N * t * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * A ** 4 / 24 + (61 - 58 * T + T * T + 600 * C - 330 * ep2) * A ** 6 / 720));
+    return [x, y];
+  }
+  function tmInv(E, Nn, lon0, k0, FE, FN, el) {
+    const [a, f] = ELL[el], e2 = f * (2 - f), ep2 = e2 / (1 - e2), e4 = e2 * e2, e6 = e4 * e2;
+    const M = (Nn - FN) / k0, mu = M / (a * (1 - e2 / 4 - 3 * e4 / 64 - 5 * e6 / 256));
+    const e1 = (1 - Math.sqrt(1 - e2)) / (1 + Math.sqrt(1 - e2));
+    const p1 = mu + (3 * e1 / 2 - 27 * e1 ** 3 / 32) * Math.sin(2 * mu) + (21 * e1 * e1 / 16 - 55 * e1 ** 4 / 32) * Math.sin(4 * mu)
+      + (151 * e1 ** 3 / 96) * Math.sin(6 * mu) + (1097 * e1 ** 4 / 512) * Math.sin(8 * mu);
+    const s = Math.sin(p1), c = Math.cos(p1), t = Math.tan(p1);
+    const C1 = ep2 * c * c, T1 = t * t, N1 = a / Math.sqrt(1 - e2 * s * s), R1 = a * (1 - e2) / (1 - e2 * s * s) ** 1.5, D = (E - FE) / (N1 * k0);
+    const lat = p1 - (N1 * t / R1) * (D * D / 2 - (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * ep2) * D ** 4 / 24
+      + (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * ep2 - 3 * C1 * C1) * D ** 6 / 720);
+    const lon = lon0 * R + (D - (1 + 2 * T1 + C1) * D ** 3 / 6 + (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * ep2 + 24 * T1 * T1) * D ** 5 / 120) / c;
+    return { lat: lat / R, lon: lon / R };
+  }
+  // LKS-94 (EPSG:3346): X – į šiaurę, Y – į rytus
+  const toLks = (lat, lon) => { const [y, x] = tmFwd(lat, lon, 24, 0.9998, 500000, 0, 'grs'); return { x, y }; };
+  const fromLks = (x, y) => tmInv(y, x, 24, 0.9998, 500000, 0, 'grs');
+  // UTM / MGRS
+  const BANDS = 'CDEFGHJKLMNPQRSTUVWX', COLS = ['STUVWXYZ', 'ABCDEFGH', 'JKLMNPQR'], ROWS = 'ABCDEFGHJKLMNPQRSTUV';
+  const zoneOf = lon => Math.floor((lon + 180) / 6) + 1, cm = z => z * 6 - 183;
+  function toUtm(lat, lon) {
+    const z = zoneOf(lon), [E, N] = tmFwd(lat, lon, cm(z), 0.9996, 500000, lat < 0 ? 10000000 : 0, 'wgs');
+    return { zone: z, band: BANDS[Math.max(0, Math.min(19, Math.floor((lat + 80) / 8)))], E, N };
+  }
+  const fromUtm = (z, band, E, N) => tmInv(E, N, cm(z), 0.9996, 500000, band && band.toUpperCase() < 'N' ? 10000000 : 0, 'wgs');
+  function toMgrs(lat, lon) {
+    const u = toUtm(lat, lon);
+    const col = COLS[u.zone % 3][Math.floor(u.E / 100000) - 1];
+    const row = ROWS[(Math.floor(u.N / 100000) + (u.zone % 2 ? 0 : 5)) % 20];
+    const p5 = v => String(Math.floor(v % 100000)).padStart(5, '0');
+    return `${u.zone}${u.band} ${col}${row} ${p5(u.E)} ${p5(u.N)}`;
+  }
+  function fromMgrs(z, band, col, row, digits) {
+    band = band.toUpperCase(); col = col.toUpperCase(); row = row.toUpperCase();
+    const ci = COLS[z % 3].indexOf(col), ri = ROWS.indexOf(row);
+    if (ci < 0 || ri < 0 || digits.length % 2 || digits.length > 10) return null;
+    const h = digits.length / 2, mul = 10 ** (5 - h);
+    const e = (+digits.slice(0, h) || 0) * mul + mul / 2 * (h < 5), n = (+digits.slice(h) || 0) * mul + mul / 2 * (h < 5);
+    const E = (ci + 1) * 100000 + e;
+    let N = ((ri - (z % 2 ? 0 : 5) + 20) % 20) * 100000 + n;
+    const bi = BANDS.indexOf(band); if (bi < 0) return null;
+    const minN = tmFwd(-80 + bi * 8, cm(z), cm(z), 0.9996, 500000, band < 'N' ? 10000000 : 0, 'wgs')[1];
+    while (N < minN - 1000) N += 2000000;
+    return fromUtm(z, band, E, N);
+  }
+  // ---------- teksto atpažinimas ----------
+  const ok = p => p && isFinite(p.lat) && isFinite(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180;
+  function parse(input) {
+    let s = String(input || '').trim();
+    if (!s) return null;
+    // Google / Apple žemėlapių nuorodos
+    let m = s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || s.match(/[?&](?:q|ll|query|destination)=(-?\d+\.\d+)(?:,|%2C)\s*(-?\d+\.\d+)/i);
+    if (m) { const p = { lat: +m[1], lon: +m[2] }; return ok(p) ? { ...p, kind: 'Nuoroda' } : null; }
+    const S = s.toUpperCase().replace(/[–—]/g, '-');
+    // MGRS: 34U FG 12345 67890
+    m = S.replace(/\s+/g, ' ').match(/^(\d{1,2})\s*([C-HJ-NP-X])\s*([A-HJ-NP-Z])\s*([A-HJ-NP-V])\s*(\d{0,10})\s*(\d{0,5})$/);
+    if (m) { const p = fromMgrs(+m[1], m[2], m[3], m[4], m[5] + m[6]); return ok(p) ? { ...p, kind: 'MGRS' } : null; }
+    // UTM: 34U 345678 6176543 arba 34 345678E 6176543N
+    m = S.match(/^(\d{1,2})\s*([C-HJ-NP-X])?\s+(\d{6}(?:[.,]\d+)?)\s*(?:M?\s*E)?[\s,;]+(\d{7}(?:[.,]\d+)?)\s*(?:M?\s*N)?$/);
+    if (m) { const p = fromUtm(+m[1], m[2] || 'U', +m[3].replace(',', '.'), +m[4].replace(',', '.')); return ok(p) ? { ...p, kind: 'UTM' } : null; }
+    const nums = (s.match(/-?\d+(?:[.,]\d+)?/g) || []).map(v => +v.replace(',', '.'));
+    if (nums.length === 2) {
+      let [a, b] = nums;
+      if (Math.abs(a) > 1000 || Math.abs(b) > 1000) {              // LKS-94
+        let x = a, y = b; if (y > x) [x, y] = [y, x];
+        if (x > 5.8e6 && x < 6.5e6 && y > 1e5 && y < 9e5) { const p = fromLks(x, y); return ok(p) ? { ...p, kind: 'LKS-94' } : null; }
+        return null;
+      }
+      if (a >= 19 && a <= 28 && b >= 52 && b <= 58) [a, b] = [b, a]; // sukeista ilguma su platuma (Lietuvai)
+      const p = { lat: a, lon: b }; return ok(p) ? { ...p, kind: 'Laipsniai' } : null;
+    }
+    const sign = v => v;
+    if (nums.length === 4) {                                     // laipsniai ir minutės
+      const p = { lat: sign(nums[0] + nums[1] / 60, 0), lon: sign(nums[2] + nums[3] / 60, 1) };
+      return ok(p) ? { ...p, kind: 'Laipsniai, minutės' } : null;
+    }
+    if (nums.length === 6) {                                     // laipsniai, minutės, sekundės
+      const p = { lat: sign(nums[0] + nums[1] / 60 + nums[2] / 3600, 0), lon: sign(nums[3] + nums[4] / 60 + nums[5] / 3600, 1) };
+      return ok(p) ? { ...p, kind: 'Laipsniai, min., sek.' } : null;
+    }
+    return null;
+  }
+  function formats(lat, lon) {
+    const l = toLks(lat, lon), dm = (v, pos, ng) => { const a = Math.abs(v), d = Math.floor(a), mn = (a - d) * 60; return `${d}°${mn.toFixed(3)}′${v < 0 ? ng : pos}`; };
+    return [
+      ['WGS84', `${lat.toFixed(6)}, ${lon.toFixed(6)}`],
+      ['LKS-94', `X ${Math.round(l.x)}  Y ${Math.round(l.y)}`],
+      ['MGRS', toMgrs(lat, lon)],
+      ['Laipsniai, min.', `${dm(lat, 'N', 'S')} ${dm(lon, 'E', 'W')}`],
+    ];
+  }
+  return { parse, formats, toLks, fromLks, toMgrs, toUtm };
+})();
+
 function meetModal(){
   if (!cur) return;
   const own=cur.owner, saved1=findSaved(cur.name)||{};
@@ -1314,9 +1425,13 @@ function meetModal(){
     return;
   }
   openModal(`<h2>🚩 Susitikimo vieta</h2>
-    ${meet?`<div class="meshCard" style="margin-bottom:12px;border-color:rgba(231,76,60,.5)"><span class="mi">🚩</span><span class="mt"><b>${esc(meet.title)}</b><small>${myPos?fmtDist(distM(myPos,meet))+' '+dirText(myPos,meet)+' · ':''}pažymėjo ${esc(meet.by)}</small></span></div>`:''}
+    ${meet?`<div class="meshCard" style="margin-bottom:12px;border-color:rgba(231,76,60,.5)"><span class="mi">🚩</span><span class="mt"><b>${esc(meet.title)}</b><small>${myPos?fmtDist(distM(myPos,meet))+' '+dirText(myPos,meet)+' · ':''}pažymėjo ${esc(meet.by)}</small></span></div>
+    <div class="coordList">${GEO.formats(meet.lat, meet.lon).map(([k,v])=>`<button class="coordRow" data-v="${esc(v)}"><span>${k}</span><b>${esc(v)}</b><i>📋</i></button>`).join('')}</div>`:''}
     <div class="field"><label>Pavadinimas</label><input id="mtName" maxlength="40" value="${esc(meet?meet.title:'Susitikimo vieta')}"></div>
     ${own?'':`<div class="field"><label>Valdymo kodas</label><input id="mtCode" maxlength="32" value="${esc(saved1.timerCode||'')}"></div>`}
+    <div class="field"><label>Koordinatės</label><input id="mtCoord" autocomplete="off" autocapitalize="characters" placeholder="55.70400, 21.30500 · LKS-94 · MGRS · nuoroda">
+      <div id="mtCoordInfo" class="muted" style="font-size:13px;margin-top:6px">Tinka: laipsniai (55.704, 21.305), laipsniai ir minutės, LKS-94 (X Y), MGRS (34U EG 19167 73178), UTM arba Google Maps nuoroda</div></div>
+    <button class="btn hidden" id="mtCoordGo">🚩 Dėti pagal koordinates</button>
     <button class="btn" id="mtPick">👆 Pažymėti žemėlapyje</button>
     <button class="btn alt" id="mtHere">📍 Mano dabartinėje vietoje</button>
     ${meet?'<button class="btn danger" id="mtClear">Pašalinti susitikimo vietą</button>':''}
@@ -1325,6 +1440,17 @@ function meetModal(){
   const code=()=>{ const c=$('mtCode'); if (!c) return undefined; upsertSaved({name:cur.name, timerCode:c.value}); return c.value; };
   const title=()=>$('mtName').value.trim()||'Susitikimo vieta';
   const send=(lat,lon,t,c)=>{ pending={meet:true}; wsSend({t:'meetSet', lat, lon, title:t, code:c}); };
+  let parsed=null;
+  $('mtCoord').oninput=()=>{
+    parsed=GEO.parse($('mtCoord').value); const info=$('mtCoordInfo');
+    $('mtCoordGo').classList.toggle('hidden', !parsed); $('mtPick').classList.toggle('alt', !!parsed);
+    if (!$('mtCoord').value.trim()){ info.style.color=''; info.textContent='Tinka: laipsniai (55.704, 21.305), laipsniai ir minutės, LKS-94 (X Y), MGRS (34U EG 19167 73178), UTM arba Google Maps nuoroda'; return; }
+    if (!parsed){ info.style.color='var(--busy)'; info.textContent='Neatpažinta. Patikrink skaičius.'; return; }
+    info.style.color='var(--ok)';
+    info.textContent=`✓ ${parsed.kind}: ${parsed.lat.toFixed(5)}, ${parsed.lon.toFixed(5)}${myPos?' · '+fmtDist(distM(myPos,parsed))+' '+dirText(myPos,parsed)+' nuo tavęs':''}`;
+  };
+  $('mtCoordGo').onclick=()=>{ if (parsed) send(parsed.lat, parsed.lon, title(), code()); };
+  $('modalBox').querySelectorAll('.coordRow').forEach(b=>b.onclick=async()=>{ try{ await navigator.clipboard.writeText(b.dataset.v); toast('Nukopijuota: '+b.dataset.v); }catch{ toast(b.dataset.v); } });
   $('mtPick').onclick=()=>{ placing={title:title(), code:code()}; closeModal(); $('placeHint').classList.remove('hidden'); };
   $('mtHere').onclick=()=>{
     const t=title(), c=code();
