@@ -7,6 +7,8 @@
     A|tekstas|siuntėjas                 – STOP (mirksi, kol patvirtinama arba 30 s)
     X                                   – STOP patvirtintas
     T|vardas                            – kas dabar kalba ("" = niekas)
+    R|azimutas,atstumas,inicialai;...   – kanalo nariai radarui (iki 8)
+    V|0/1                               – vaizdas: 0 automatinis, 1 visada radaras
     K|1  K|2  K|0                       – kalibravimas: 1 žiūrėk tiesiai, 2 nulenk galvą, 0 atstatyti
     L|0..255  F|0/1  D|laipsniai  O|laipsniai – ryškumas, apversti 180°, magnetinė deklinacija, pataisa
     P                                   – būsenos užklausa
@@ -38,6 +40,9 @@ Preferences prefs;
 // ---------------- būsena ----------------
 struct Nav { bool has = false; float brg = 0, dist = 0; char title[40] = ""; uint32_t at = 0; } nav;
 char talker[24] = "";
+struct Mem { float brg, dist; char ini[8]; };
+Mem mem[8]; int memN = 0; uint32_t memAt = 0;
+uint8_t viewMode = 0;
 char msgText[160] = "", msgFrom[32] = ""; uint32_t msgUntil = 0;
 bool alarmOn = false; char alarmText[80] = "", alarmFrom[32] = ""; uint32_t alarmAt = 0;
 bool connected = false; uint32_t connectedAt = 0;
@@ -108,6 +113,7 @@ void loadPrefs() {
   fwd[0] = prefs.getFloat("f0", 1); fwd[1] = prefs.getFloat("f1", 0); fwd[2] = prefs.getFloat("f2", 0);
   decl = prefs.getFloat("decl", 7.5f); hOffset = prefs.getFloat("off", 0);
   contrast = prefs.getUChar("lum", 160); flip = prefs.getBool("flip", false);
+  viewMode = prefs.getUChar("view", 0);
   prefs.end();
 }
 void savePrefs() {
@@ -116,6 +122,7 @@ void savePrefs() {
   prefs.putFloat("f0", fwd[0]); prefs.putFloat("f1", fwd[1]); prefs.putFloat("f2", fwd[2]);
   prefs.putFloat("decl", decl); prefs.putFloat("off", hOffset);
   prefs.putUChar("lum", contrast); prefs.putBool("flip", flip);
+  prefs.putUChar("view", viewMode);
   prefs.end();
 }
 
@@ -155,6 +162,21 @@ void handle(char *line) {
       alarmOn = true; alarmAt = now; break;
     case 'X': alarmOn = false; break;
     case 'T': copyStr(talker, n >= 2 ? p[1] : "", sizeof talker); break;
+    case 'R': {
+      memN = 0; memAt = now;
+      if (n < 2) break;
+      char *save1 = nullptr;
+      for (char *it = strtok_r(p[1], ";", &save1); it && memN < 8; it = strtok_r(nullptr, ";", &save1)) {
+        char *save2 = nullptr;
+        char *a = strtok_r(it, ",", &save2), *b = strtok_r(nullptr, ",", &save2), *c3 = strtok_r(nullptr, ",", &save2);
+        if (!a || !b) continue;
+        mem[memN].brg = atof(a); mem[memN].dist = atof(b);
+        copyStr(mem[memN].ini, c3 ? c3 : "", sizeof mem[memN].ini);
+        memN++;
+      }
+      break;
+    }
+    case 'V': if (n >= 2) { viewMode = atoi(p[1]) ? 1 : 0; savePrefs(); } break;
     case 'K':
       if (n >= 2 && p[1][0] == '1') { upInSensor(cal1); cal1Ok = true; }
       else if (n >= 2 && p[1][0] == '2' && cal1Ok) {
@@ -272,9 +294,61 @@ void drawStatusRow() {
   else if (!calibrated && (millis() / 700) % 2) { oled.setFont(u8g2_font_5x8_tf); oled.drawStr(66, 8, "KALIBR."); }
 }
 
+// radaras: tu centre, viršus – kur žiūri
+void drawFlag(int x, int y) { oled.drawVLine(x, y - 7, 8); oled.drawTriangle(x + 1, y - 7, x + 1, y - 3, x + 5, y - 5); }
+
+void drawRadar(bool navFresh) {
+  const int cx = 32, cy = 32, R = 30;
+  float maxd = 0;
+  for (int i = 0; i < memN; i++) maxd = max(maxd, mem[i].dist);
+  if (navFresh) maxd = max(maxd, nav.dist);
+  static const int scales[] = {50, 100, 250, 500, 1000, 2000, 5000};
+  int sc = 5000;
+  for (int v : scales) if (v >= maxd * 1.1f) { sc = v; break; }
+
+  oled.drawCircle(cx, cy, R); oled.drawCircle(cx, cy, R / 2);
+  oled.drawPixel(cx, cy - R + 1); oled.drawTriangle(cx - 2, cy + 2, cx + 2, cy + 2, cx, cy - 3);   // tu
+  if (headingOk) {                                     // Š žymė ant krašto
+    float a = -heading * PI / 180.0f;
+    int nx = cx + (int)lroundf(sinf(a) * (R - 5)), ny = cy - (int)lroundf(cosf(a) * (R - 5));
+    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(nx - 3, ny + 4, "Š");
+  }
+  auto pos = [&](float brg, float dist, int &x, int &y, bool &edge) {
+    float r = dist / sc * R; edge = r > R - 2; if (edge) r = R - 2;
+    float a = (brg - (headingOk ? heading : 0)) * PI / 180.0f;
+    x = cx + (int)lroundf(sinf(a) * r); y = cy - (int)lroundf(cosf(a) * r);
+  };
+  int nearest = -1;
+  for (int i = 0; i < memN; i++) {
+    int x, y; bool e; pos(mem[i].brg, mem[i].dist, x, y, e);
+    if (e) oled.drawCircle(x, y, 2); else oled.drawDisc(x, y, 2);
+    if (nearest < 0 || mem[i].dist < mem[nearest].dist) nearest = i;
+  }
+  if (navFresh) { int x, y; bool e; pos(nav.brg, nav.dist, x, y, e); drawFlag(x, y); }
+  if (nearest >= 0) { int x, y; bool e; pos(mem[nearest].brg, mem[nearest].dist, x, y, e); oled.drawCircle(x, y, 4); }
+
+  // dešinė pusė
+  char num[12], unit[4], b[32];
+  oled.setFont(u8g2_font_6x12_te);
+  fmtDist(sc, num, unit); snprintf(b, sizeof b, "R %s %s", num, unit); oled.drawUTF8(66, 22, b);
+  if (nearest >= 0) {
+    fmtDist(mem[nearest].dist, num, unit);
+    oled.setFont(u8g2_font_9x15_te); oled.drawUTF8(66, 38, mem[nearest].ini);
+    snprintf(b, sizeof b, "%s %s", num, unit);
+    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(66, 50, b);
+  }
+  if (navFresh) {
+    fmtDist(nav.dist, num, unit); snprintf(b, sizeof b, "%s %s", num, unit);
+    drawFlag(67, 62); oled.drawUTF8(75, 63, b);
+  }
+  drawStatusRow();
+}
+
 void drawNav() {
   uint32_t now = millis();
   bool fresh = connected && nav.has && now - nav.at < 30000;
+  bool memFresh = connected && memN > 0 && now - memAt < 30000;
+  if (memFresh && (viewMode == 1 || !fresh)) { drawRadar(fresh); return; }
   if (fresh && nav.dist < 25) {
     oled.drawCircle(32, 32, 24); oled.drawCircle(32, 32, 14); oled.drawDisc(32, 32, 4);
     oled.setFont(u8g2_font_10x20_te); oled.drawUTF8(80, 40, "ČIA");

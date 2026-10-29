@@ -1054,7 +1054,7 @@ function distM(a,b){ const R=6371000, r=Math.PI/180, dLa=(b.lat-a.lat)*r, dLo=(b
 const fmtDist = m => m<1000 ? Math.round(m)+' m' : (m/1000).toFixed(m<10000?1:0).replace('.',',')+' km';
 function fmtAgo(ts){ const s=Math.max(0,Math.round((sNow()-ts)/1000)); return s<10?'ką tik':s<60?`prieš ${s} s`:`prieš ${Math.round(s/60)} min.`; }
 
-function setLocs(list, now){ if (now) srvOff = now - Date.now(); locs = list||[]; renderMapBtn(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
+function setLocs(list, now){ if (now) srvOff = now - Date.now(); locs = list||[]; renderMapBtn(); if (hudReady()) ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
 function renderMapBtn(){
   const n=locs.length, me=!!shareState();
   $('mapBtn').textContent = '🗺️ Žemėlapis' + (n ? ` (${n})` : '');
@@ -1093,7 +1093,7 @@ function startGeo(){
 function stopGeo(){ if (geoWatch!==null){ navigator.geolocation.clearWatch(geoWatch); geoWatch=null; } clearInterval(stopGeo.iv); lastLocSent=null; }
 let sharingWas=false;
 // vieta sekama, jei ją rodai kitiems arba yra susitikimo vieta (tada tik atstumui skaičiuoti – niekam nesiunčiama)
-function ensureGeo(){ if (shareState() || (meet && (geoGranted || hudReady())) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
+function ensureGeo(){ if (shareState() || ((meet || (locs && locs.length)) && hudReady()) || (meet && geoGranted) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
 let geoGranted=false;
 try{ navigator.permissions && navigator.permissions.query({name:'geolocation'}).then(p=>{ geoGranted = p.state==='granted'; p.onchange=()=>{ geoGranted=p.state==='granted'; }; }).catch(()=>{}); }catch{}
 function startSharing(hours){
@@ -1671,6 +1671,12 @@ function hudTick(){
   if (!hudReady()) { hudLastTalker=null; return; }
   if (meet && myPos) hudSend(`N|${bearing(myPos,meet).toFixed(0)}|${distM(myPos,meet).toFixed(0)}|${hudClean(meet.title).slice(0,30)}`);
   else hudSend('N|-1');
+  const now=sNow(), mates=(locs||[]).filter(l=>l.id!==myLocId && now-l.ts<10*60000);
+  if (myPos && mates.length){
+    const ini = n => { const w=hudClean(n).replace(/[,;]/g,'').split(' ').filter(Boolean); return (w.length>1 ? w[0][0]+w[1][0] : (w[0]||'?').slice(0,2)).toUpperCase(); };
+    hudSend('R|'+mates.map(l=>({b:bearing(myPos,l), d:distM(myPos,l), i:ini(l.name)})).sort((a,b)=>a.d-b.d).slice(0,8)
+      .map(m=>`${m.b.toFixed(0)},${m.d.toFixed(0)},${m.i}`).join(';'));
+  } else hudSend('R|');
   const t = (cur && talkerName && talkerName!==myName) ? hudClean(talkerName).slice(0,20) : '';
   if (t!==hudLastTalker){ hudLastTalker=t; hudSend('T|'+t); }
 }
@@ -1685,7 +1691,8 @@ function hudRefresh(){
   if (was!==hudState.state){
     if (hudReady()){ ensureGeo(); hudLastTalker=null;
       const lum=store.get('vc_hud_lum',null), flip=store.get('vc_hud_flip',null);
-      if (lum!==null) hudSend('L|'+lum); if (flip!==null) hudSend('F|'+flip); hudTick(); }
+      if (lum!==null) hudSend('L|'+lum); if (flip!==null) hudSend('F|'+flip);
+      hudSend('V|'+store.get('vc_hud_view','0')); hudTick(); }
   }
   renderHudDot();
   if ($('hudModalMark')) renderHudModal();
@@ -1721,6 +1728,7 @@ function renderHudModal(){
     <div class="rowBtns"><button class="btn alt" id="hOm">↺ −5°</button><button class="btn alt" id="hO0">${off}°</button><button class="btn alt" id="hOp">↻ +5°</button></div>
     <div class="sec"><span>Ekranas</span></div>
     <div class="field"><label>Ryškumas</label><input type="range" id="hLum" min="1" max="255" value="${lum}" style="width:100%"></div>
+    <button class="menuItem" id="hView">📡<span>Radaras: <b>${store.get('vc_hud_view','0')==='1'?'VISADA':'AUTOMATIŠKAI'}</b><small>${store.get('vc_hud_view','0')==='1'?'Nariai ir 🚩 rodomi radare visada':'Yra 🚩 – rodyklė, nėra – radaras su nariais, kurie rodo vietą'}</small></span></button>
     <button class="menuItem" id="hFlip">🔄<span>Apversti vaizdą 180°: <b>${flip?'TAIP':'NE'}</b><small>Jei monoklis ant kitos akies ir vaizdas aukštyn kojom</small></span></button>
     <button class="btn" id="hTest">Rodyti bandomąją žinutę</button>`:''}
     ${st.state!=='off'?`<button class="btn danger" id="hOff">Atjungti monoklį</button>`:''}
@@ -1735,6 +1743,7 @@ function renderHudModal(){
   const setOff = v => { v=((v+180)%360+360)%360-180; store.set('vc_hud_off', String(v)); hudSend('O|'+v); renderHudModal(); };
   $('hOm').onclick = () => setOff(off-5); $('hOp').onclick = () => setOff(off+5); $('hO0').onclick = () => setOff(0);
   $('hLum').onchange = e => { store.set('vc_hud_lum', e.target.value); hudSend('L|'+e.target.value); };
+  $('hView').onclick = () => { const v=store.get('vc_hud_view','0')==='1'?'0':'1'; store.set('vc_hud_view', v); hudSend('V|'+v); renderHudModal(); };
   $('hFlip').onclick = () => { const f=flip?'0':'1'; store.set('vc_hud_flip', f); hudSend('F|'+f); renderHudModal(); };
   $('hTest').onclick = () => { hudMsg('M', 'Bandymas. Monoklis veikia.', myName||'311 VoiceCH'); toast('Išsiųsta į monoklį'); };
 }
