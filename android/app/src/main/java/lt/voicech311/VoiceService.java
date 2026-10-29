@@ -85,6 +85,15 @@ public class VoiceService extends Service {
             @Override public void onMeshText(String text, long from) { handleMeshText(text); }
             @Override public void onMeshStatus() { MainActivity.meshStatus(mesh.info().toString()); }
         });
+        hud = new HudLink(this, () -> MainActivity.hudStatus(hud.info().toString()));
+    }
+
+    // ---------- monoklis ----------
+    HudLink hud;
+
+    static boolean hudSend(String line) {
+        VoiceService s = inst;
+        return s != null && s.hud != null && s.hud.send(line);
     }
 
     // ---------- Meshtastic (LoRa) ----------
@@ -123,7 +132,9 @@ public class VoiceService extends Service {
         } else if (text.startsWith("🚨") || text.startsWith("📢")) {
             alarm = text.startsWith("🚨"); cmd = text.substring(2).trim(); who = "LoRa";
         } else {
-            return; // kitos Meshtastic žinutės mūsų neliečia
+            // kitos Meshtastic žinutės – tik į monoklį
+            if (hud != null) hud.send("M|" + text.replace('|', '/').replace('\n', ' ') + "|LoRa");
+            return;
         }
         if (!markSeen(id)) return;
         if (alarm) doAlarm(cmd, who + " · LoRa");
@@ -340,6 +351,7 @@ public class VoiceService extends Service {
         handler.removeCallbacksAndMessages(null);
         releaseTone();
         if (mesh != null) mesh.shutdown();
+        if (hud != null) hud.shutdown();
         if (session != null) session.release();
         resetAudioMode();
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();

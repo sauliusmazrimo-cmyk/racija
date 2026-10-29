@@ -11,7 +11,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.origin !== location.origin) return;
-  if (/^\/(ws|audio|apk|health|webver|version|\.well-known)/.test(u.pathname)) return;
+  if (/^\/(ws|audio|apk|health|webver|version|fw|monoklis|\.well-known)/.test(u.pathname)) return;
   const key = e.request.mode === 'navigate' ? '/' : e.request; // pagrindinis puslapis saugomas be kvietimo parametrų
   e.respondWith(
     fetch(e.request).then(r => {

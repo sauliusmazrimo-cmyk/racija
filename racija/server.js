@@ -610,6 +610,35 @@ app.get('/version', async (_, res) => {
   res.set('Cache-Control', 'no-store').json(verCache.data);
 });
 
+// monoklio programa (GitHub Releases per serverį, kad naršyklė galėtų ją įrašyti per USB)
+const FW_BASE = process.env.FW_BASE || 'https://github.com/sauliusmazrimo-cmyk/racija/releases/download/monoklis-latest/';
+let fwCache = { at: 0, bin: null, ver: '' };
+async function loadFw() {
+  if (fwCache.bin && Date.now() - fwCache.at < 10 * 60 * 1000) return fwCache;
+  try {
+    const j = await fetch(FW_BASE + 'monoklis.json', { signal: AbortSignal.timeout(8000) });
+    const ver = j.ok ? String((await j.json()).version || '') : '';
+    if (!fwCache.bin || ver !== fwCache.ver) {
+      const r = await fetch(FW_BASE + 'monoklis.bin', { signal: AbortSignal.timeout(30000) });
+      if (r.ok) fwCache = { at: Date.now(), bin: Buffer.from(await r.arrayBuffer()), ver };
+    } else fwCache.at = Date.now();
+  } catch {}
+  return fwCache;
+}
+app.get('/monoklis', (_, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, 'public', 'monoklis.html')));
+app.get('/fw/manifest.json', async (_, res) => {
+  const f = await loadFw();
+  res.set('Cache-Control', 'no-store').json({
+    name: '311 VoiceCH monoklis', version: f.ver ? '1.0.' + f.ver : '', new_install_prompt_erase: true,
+    builds: [{ chipFamily: 'ESP32-C3', parts: [{ path: '/fw/monoklis.bin?v=' + f.ver, offset: 0 }] }]
+  });
+});
+app.get('/fw/monoklis.bin', async (_, res) => {
+  const f = await loadFw();
+  if (!f.bin) return res.status(503).send('nepasiekiama');
+  res.set('Cache-Control', 'no-cache').type('application/octet-stream').send(f.bin);
+});
+
 app.get('/health', (_, res) => res.json({
   ok: true, version: '0.9', channels: Object.keys(db.channels).length, clients: wss.clients.size,
   persistent: !!process.env.RAILWAY_VOLUME_MOUNT_PATH, admin: !!ADMIN_KEY, retentionHours: RETENTION_MS / 3600000, encrypted: !!AUDIO_KEY

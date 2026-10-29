@@ -145,6 +145,8 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_BT) {
             MeshLink m = mesh();
             if (m != null) meshStatus(m.info().toString());
+            HudLink hl = hud();
+            if (hl != null) { hudStatus(hl.info().toString()); if (hasScanPerm()) hl.scan(); }
             return;
         }
         if (pendingWebPermission != null) {
@@ -263,6 +265,12 @@ public class MainActivity extends Activity {
         a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativeMeshStatus&&nativeMeshStatus(" + jsStr(json) + ")", null));
     }
 
+    static void hudStatus(String json) {
+        MainActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.nativeHudStatus&&nativeHudStatus(" + jsStr(json) + ")", null));
+    }
+
     static void meshToJs(String raw, boolean alarmHandled) {
         MainActivity a = instance;
         if (a == null) return;
@@ -273,6 +281,13 @@ public class MainActivity extends Activity {
         return Build.VERSION.SDK_INT < 31
                 || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
     }
+
+    private boolean hasScanPerm() {
+        return Build.VERSION.SDK_INT < 31
+                || (checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED && hasBtPerm());
+    }
+
+    private HudLink hud() { VoiceService s = VoiceService.inst; return s == null ? null : s.hud; }
 
     private MeshLink mesh() { VoiceService s = VoiceService.inst; return s == null ? null : s.mesh; }
 
@@ -326,6 +341,24 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> { try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); } catch (Exception ignored) {} });
         }
         @JavascriptInterface public void alarmStop() { VoiceService.alarmStop(); }
+        // ---- monoklis ----
+        @JavascriptInterface public String hudInfo() {
+            HudLink hl = hud();
+            if (hl == null) return "{\"state\":\"no_service\"}";
+            try { return hl.info().put("perm", hasScanPerm()).toString(); } catch (Exception e) { return "{}"; }
+        }
+        @JavascriptInterface public void hudScan() {
+            runOnUiThread(() -> {
+                if (!hasScanPerm()) {
+                    if (Build.VERSION.SDK_INT >= 31) requestPermissions(new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, REQ_BT);
+                    return;
+                }
+                HudLink hl = hud(); if (hl != null) hl.scan();
+            });
+        }
+        @JavascriptInterface public void hudConnect(String address) { HudLink hl = hud(); if (hl != null) runOnUiThread(() -> hl.connect(address)); }
+        @JavascriptInterface public void hudDisconnect() { HudLink hl = hud(); if (hl != null) runOnUiThread(hl::disconnect); }
+        @JavascriptInterface public boolean hudSend(String line) { return VoiceService.hudSend(line); }
         @JavascriptInterface public boolean isNative() { return true; }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public void setStatus(String text) { VoiceService.updateStatus(text); }

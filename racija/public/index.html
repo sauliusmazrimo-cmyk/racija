@@ -171,6 +171,12 @@ input:focus{border-color:var(--accent)}
 #meshDot{font-size:13px;margin-left:2px}
 #meshDot.off{display:none}
 #meshDot.warn{opacity:.35;filter:grayscale(1)}
+#hudDot{font-size:13px;margin-left:2px}
+#hudDot.warn{opacity:.35;filter:grayscale(1)}
+.calStep{display:flex;gap:10px;align-items:center;margin:8px 0}
+.calStep .n{flex:0 0 28px;height:28px;border-radius:50%;background:var(--panel);display:grid;place-items:center;font-weight:700}
+.calStep.done .n{background:var(--ok);color:#000}
+.rowBtns{display:flex;gap:8px}.rowBtns .btn{flex:1}
 select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:17px}
 .check{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);margin-bottom:14px;color:var(--text);font-size:15px}
 .check input{width:22px;height:22px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
@@ -868,6 +874,7 @@ $('menuBtn').onclick = () => {
     <button class="menuItem" id="miMap">🗺️<span>Žemėlapis<small>Kur yra kanalo nariai (rodo tik įsijungę)</small></span></button>
     <button class="menuItem" id="miTimer">⏰<span>Laikmatis<small>Atgalinis laiko skaičiavimas visiems kanalo nariams</small></span></button>
     <button class="menuItem" id="miCmds">📢<span>Greitos komandos<small>Keisti tekstą, įrašyti savo balsu</small></span></button>
+    ${NATIVE?`<button class="menuItem" id="miHud">👓<span>Monoklis: ${esc(HUD_LABEL[hudState.state]||'')}<small>Rodyklė į susitikimo vietą, komandos ir STOP prie akies</small></span></button>`:''}
     ${NATIVE?`<button class="menuItem" id="miMesh">📡<span>LoRa (Meshtastic): ${esc(MESH_LABEL[meshState.state]||'')}<small>STOP ir komandos be interneto</small></span></button>`:''}
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
     ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
@@ -885,6 +892,7 @@ $('menuBtn').onclick = () => {
   $('miTimer').onclick = () => timerModal();
   $('miMap').onclick = () => { closeModal(); openMap(); };
   if ($('miMesh')) $('miMesh').onclick = () => meshModal();
+  if ($('miHud')) $('miHud').onclick = () => hudModal();
   $('miMine').onclick = () => {
     upsertSaved({name:cur.name, hiddenBefore:Date.now()});
     $('hist').innerHTML=''; renderHistEmpty(); closeModal(); toast('Istorija išvalyta šiame telefone');
@@ -1085,7 +1093,7 @@ function startGeo(){
 function stopGeo(){ if (geoWatch!==null){ navigator.geolocation.clearWatch(geoWatch); geoWatch=null; } clearInterval(stopGeo.iv); lastLocSent=null; }
 let sharingWas=false;
 // vieta sekama, jei ją rodai kitiems arba yra susitikimo vieta (tada tik atstumui skaičiuoti – niekam nesiunčiama)
-function ensureGeo(){ if (shareState() || (meet && geoGranted) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
+function ensureGeo(){ if (shareState() || (meet && (geoGranted || hudReady())) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
 let geoGranted=false;
 try{ navigator.permissions && navigator.permissions.query({name:'geolocation'}).then(p=>{ geoGranted = p.state==='granted'; p.onchange=()=>{ geoGranted=p.state==='granted'; }; }).catch(()=>{}); }catch{}
 function startSharing(hours){
@@ -1455,6 +1463,7 @@ function siren(sec=3){
 }
 function stopSiren(){ sirenNodes.forEach(o=>{ try{o.stop()}catch{} }); sirenNodes=[]; }
 function showAlarm(from, text, cid, nativeDone){
+  hudMsg('A', text, from);
   $('alarmTxt').textContent = text;
   $('alarmFrom').textContent = '— ' + from;
   $('alarm').classList.remove('hidden');
@@ -1462,6 +1471,7 @@ function showAlarm(from, text, cid, nativeDone){
   vib([600,200,600,200,600,200,1200]);
 }
 $('alarmOk').onclick = () => {
+  hudSend('X');
   $('alarm').classList.add('hidden'); stopSiren(); vib(0);
   if (NATIVE) try{ Native311.alarmStop(); }catch{}
 };
@@ -1471,6 +1481,7 @@ function showBanner(text, sub, ms=4500){
   clearTimeout(showCmd.t); showCmd.t=setTimeout(()=>$('cmdBanner').classList.add('hidden'), ms);
 }
 function showCmd(from, text, voice){
+  hudMsg('M', text, from);
   $('cbTxt').textContent = '📢 ' + text;
   $('cbFrom').textContent = from;
   $('cmdBanner').classList.remove('hidden');
@@ -1646,6 +1657,88 @@ function renderMeshModal(){
   if ($('mOff')) $('mOff').onclick = () => Native311.meshDisconnect();
 }
 if (NATIVE){ setTimeout(meshRefresh, 800); setInterval(meshRefresh, 5000); }
+
+// ---------- monoklis (BLE) ----------
+let hudState = {state:'off'};
+const hudReady = () => NATIVE && hudState.state==='connected';
+const HUD_LABEL = {off:'Neprijungtas', no_perm:'Reikia Bluetooth leidimo', bt_off:'Bluetooth išjungtas', connecting:'Jungiamasi…',
+  connected:'Prijungtas', not_hud:'Tai ne monoklis', disconnected:'Ryšys nutrūko, jungiamasi iš naujo…', no_service:'Paleidžiama…'};
+const hudClean = t => String(t||'').replace(/[|\r\n]+/g,' ').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu,'').replace(/\s+/g,' ').trim().slice(0,150);
+function hudSend(line){ if (!hudReady()) return false; try{ return Native311.hudSend(line); }catch{ return false; } }
+function hudMsg(kind, text, from){ hudSend(`${kind}|${hudClean(text)}|${hudClean(from)}`); }
+let hudLastTalker=null, hudCal=0;
+function hudTick(){
+  if (!hudReady()) { hudLastTalker=null; return; }
+  if (meet && myPos) hudSend(`N|${bearing(myPos,meet).toFixed(0)}|${distM(myPos,meet).toFixed(0)}|${hudClean(meet.title).slice(0,30)}`);
+  else hudSend('N|-1');
+  const t = (cur && talkerName && talkerName!==myName) ? hudClean(talkerName).slice(0,20) : '';
+  if (t!==hudLastTalker){ hudLastTalker=t; hudSend('T|'+t); }
+}
+function hudParseStatus(s){
+  const p=String(s||'').split('|'); if (p[0]!=='S') return null;
+  return {hdg:+p[1], acc:+p[2], mv:+p[3], cal:p[4]==='1', ver:p[5]||''};
+}
+function hudRefresh(){
+  if (!NATIVE) return;
+  const was=hudState.state;
+  try{ hudState = JSON.parse(Native311.hudInfo()); }catch{}
+  if (was!==hudState.state){
+    if (hudReady()){ ensureGeo(); hudLastTalker=null;
+      const lum=store.get('vc_hud_lum',null), flip=store.get('vc_hud_flip',null);
+      if (lum!==null) hudSend('L|'+lum); if (flip!==null) hudSend('F|'+flip); hudTick(); }
+  }
+  renderHudDot();
+  if ($('hudModalMark')) renderHudModal();
+}
+window.nativeHudStatus = () => hudRefresh();
+function renderHudDot(){
+  let d=$('hudDot');
+  if (!d){ d=document.createElement('span'); d.id='hudDot'; d.textContent='👓'; d.title='Monoklis'; ($('meshDot')||$('dot')).after(d); }
+  d.className = hudReady() ? 'on' : 'warn';
+  d.classList.toggle('hidden', !NATIVE || hudState.state==='off');
+}
+function hudModal(){ hudCal=0; openModal('<div id="hudModalMark"></div>'); renderHudModal(); if (!hudReady() && hudState.state!=='connecting') try{ Native311.hudScan(); }catch{} }
+function renderHudModal(){
+  const st=hudState, ok=hudReady(), S=hudParseStatus(st.status);
+  const ACC=['nekalibruotas','silpnas','vidutinis','geras'];
+  const info = ok && S ? [S.hdg>=0?`kryptis ${S.hdg}°`:'nėra kompaso', S.hdg>=0?`kompasas ${ACC[S.acc]||'?'}`:'', S.mv?`baterija ${Math.max(0,Math.min(100,Math.round((S.mv-3350)/8)))}%`:'', S.ver?'v'+S.ver:''].filter(Boolean).join(' · ') : (st.name||'Monoklis nepasirinktas');
+  const found=(st.found||[]);
+  const list = !ok ? (st.perm===false
+      ? `<p class="muted">Reikia leidimo ieškoti Bluetooth įrenginių.</p><button class="btn" id="hScan">Leisti ir ieškoti</button>`
+      : `${found.map(d=>`<button class="menuItem hudDev" data-a="${esc(d.address)}">${d.address===st.address?'✅':'👓'}<span>${esc(d.name)}<small>${esc(d.address)}</small></span></button>`).join('')}
+         <p class="muted" style="font-size:13px">${st.scanning?'🔎 Ieškoma… Įjunk monoklį ir laikyk šalia telefono.':found.length?'Paspausk monoklį, kad prijungtum.':'Monoklis nerastas. Įjunk jį ir ieškok dar kartą.'}</p>
+         <button class="btn alt" id="hScan">${st.scanning?'Ieškoma…':'Ieškoti monoklio'}</button>`) : '';
+  const lum=+store.get('vc_hud_lum','160'), flip=store.get('vc_hud_flip','0')==='1', off=+store.get('vc_hud_off','0');
+  $('modalBox').innerHTML = `<div id="hudModalMark"></div><h2>👓 Monoklis</h2>
+    <div class="meshCard ${ok?'ok':''}" style="margin-bottom:14px"><span class="mi">👓</span><span class="mt"><b>${esc(HUD_LABEL[st.state]||st.state)}</b><small>${esc(info)}</small></span></div>
+    ${list}
+    ${ok?`
+    <div class="sec"><span>Kompaso kalibravimas${S&&!S.cal?' – būtina':''}</span></div>
+    <p class="muted" style="font-size:13px">Užsidėk šalmą. Monoklis turi žinoti, kur yra „priekis“.</p>
+    <div class="calStep ${hudCal>=1?'done':''}"><span class="n">1</span><button class="btn" id="hK1" style="margin:0">Žiūriu tiesiai į priekį</button></div>
+    <div class="calStep ${hudCal>=2?'done':''}"><span class="n">2</span><button class="btn ${hudCal<1?'alt':''}" id="hK2" style="margin:0" ${hudCal<1?'disabled':''}>Nulenkiau galvą žemyn</button></div>
+    <p class="muted" style="font-size:13px">Pirmą kartą taip pat lėtai pasuk galvą aštuoniuke į visas puses – kompasas susikalibruos pats. Jei rodyklė vis tiek truputį nukrypsta, pataisyk:</p>
+    <div class="rowBtns"><button class="btn alt" id="hOm">↺ −5°</button><button class="btn alt" id="hO0">${off}°</button><button class="btn alt" id="hOp">↻ +5°</button></div>
+    <div class="sec"><span>Ekranas</span></div>
+    <div class="field"><label>Ryškumas</label><input type="range" id="hLum" min="1" max="255" value="${lum}" style="width:100%"></div>
+    <button class="menuItem" id="hFlip">🔄<span>Apversti vaizdą 180°: <b>${flip?'TAIP':'NE'}</b><small>Jei monoklis ant kitos akies ir vaizdas aukštyn kojom</small></span></button>
+    <button class="btn" id="hTest">Rodyti bandomąją žinutę</button>`:''}
+    ${st.state!=='off'?`<button class="btn danger" id="hOff">Atjungti monoklį</button>`:''}
+    <p class="muted" style="font-size:13px">Monoklis rodo rodyklę ir atstumą iki 🚩 susitikimo vietos, kas kalba, greitas komandas, LoRa žinutes ir STOP. Programą į monoklį įrašysi kompiuteriu: <b>racija-production.up.railway.app/monoklis</b></p>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`;
+  if ($('hScan')) $('hScan').onclick = () => { try{ Native311.hudScan(); }catch{} };
+  $('modalBox').querySelectorAll('.hudDev').forEach(b=>b.onclick=()=>{ Native311.hudConnect(b.dataset.a); toast('Jungiamasi…'); });
+  if ($('hOff')) $('hOff').onclick = () => Native311.hudDisconnect();
+  if (!ok) return;
+  $('hK1').onclick = () => { hudSend('K|1'); hudCal=1; vib(30); renderHudModal(); };
+  $('hK2').onclick = () => { hudSend('K|2'); hudCal=2; store.set('vc_hud_off','0'); vib([30,60,30]); renderHudModal(); toast('Kalibruota – patikrink rodyklę'); };
+  const setOff = v => { v=((v+180)%360+360)%360-180; store.set('vc_hud_off', String(v)); hudSend('O|'+v); renderHudModal(); };
+  $('hOm').onclick = () => setOff(off-5); $('hOp').onclick = () => setOff(off+5); $('hO0').onclick = () => setOff(0);
+  $('hLum').onchange = e => { store.set('vc_hud_lum', e.target.value); hudSend('L|'+e.target.value); };
+  $('hFlip').onclick = () => { const f=flip?'0':'1'; store.set('vc_hud_flip', f); hudSend('F|'+f); renderHudModal(); };
+  $('hTest').onclick = () => { hudMsg('M', 'Bandymas. Monoklis veikia.', myName||'311 VoiceCH'); toast('Išsiųsta į monoklį'); };
+}
+if (NATIVE){ setTimeout(hudRefresh, 900); setInterval(hudRefresh, 4000); setInterval(hudTick, 2000); }
 
 // ---------- programėlės atnaujinimai ----------
 let updInfo=null;
