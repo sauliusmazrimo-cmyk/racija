@@ -360,6 +360,10 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void hudDisconnect() { HudLink hl = hud(); if (hl != null) runOnUiThread(hl::disconnect); }
         @JavascriptInterface public boolean hudSend(String line) { return VoiceService.hudSend(line); }
         @JavascriptInterface public boolean isNative() { return true; }
+        /** Telefono ID (nesikeičia perinstaliavus programėlę) – bandomajam laikotarpiui. */
+        @JavascriptInterface public String deviceId() {
+            try { return "a:" + Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID); } catch (Exception e) { return ""; }
+        }
         @JavascriptInterface public String version() { return BuildConfig.VERSION_NAME; }
         @JavascriptInterface public void setStatus(String text) { VoiceService.updateStatus(text); }
         @JavascriptInterface public void exitApp() {

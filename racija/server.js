@@ -274,9 +274,9 @@ function licStatus(name) {
   if (ch.free) return { ok: true, kind: 'free' };
   const L = ch.license && db.lic.codes[ch.license];
   if (L && L.until > Date.now()) return { ok: true, kind: 'lic', org: L.org, until: L.until, maxUsers: L.maxUsers };
-  const trialEnd = Math.max(ch.created || 0, db.lic.enabledAt || 0) + db.lic.trialDays * DAY;
+  const trialEnd = ch.noTrial ? 0 : Math.max(ch.created || 0, db.lic.enabledAt || 0) + db.lic.trialDays * DAY;
   if (Date.now() < trialEnd) return { ok: true, kind: 'trial', until: trialEnd, expired: L ? L.until : undefined };
-  return { ok: false, kind: L ? 'licExpired' : 'expired', org: L ? L.org : undefined, until: L ? L.until : trialEnd };
+  return { ok: false, kind: L ? 'licExpired' : 'expired', org: L ? L.org : undefined, until: L ? L.until : trialEnd, noTrial: !!ch.noTrial && !L };
 }
 const licOk = (ws) => ws.isAdmin || !ws.chan || licStatus(ws.chan).ok;
 function licDenied(ws) {
@@ -385,6 +385,13 @@ wss.on('connection', (ws, req) => {
         if (db.channels[name]) return err(ws, 'exists', 'Toks kanalas jau yra. Pasirink kitą pavadinimą arba prisijunk.');
         setUser(ws, m);
         db.channels[name] = { owners: [ws.tokenHash], created: Date.now(), history: [], public: !!m.public };
+        if (db.lic.enabled && !ws.isAdmin) {
+          // bandomasis laikotarpis – vieną kartą vienam telefonui
+          const dev = sha('dev:' + String(m.dev || m.token || ws.ip)).slice(0, 24);
+          db.lic.devs = db.lic.devs || {};
+          if (db.lic.devs[dev]) db.channels[name].noTrial = true; else db.lic.devs[dev] = Date.now();
+          db.channels[name].dev = dev;
+        }
         setPw(db.channels[name], m.password);
         saveDb();
         return attach(ws, name);

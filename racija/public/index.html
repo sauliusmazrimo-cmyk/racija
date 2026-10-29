@@ -491,6 +491,7 @@ function ensureWs(){
   ws.onmessage = onMsg;
 }
 function wsSend(obj){
+  if (obj.t==='create' && NATIVE && Native311.deviceId) try{ obj.dev = Native311.deviceId(); }catch{}
   const s=JSON.stringify(obj);
   if (ws && ws.readyState===1) ws.send(s); else { sendQueue.push(s); ensureWs(); }
 }
@@ -670,7 +671,7 @@ const daysLeft = ts => Math.max(0, Math.ceil((ts-Date.now())/86400000));
 function licLabel(l){
   if (!l) return '';
   return {off:'nemokama', free:'nemokama', lic:`${l.org||'licencija'} iki ${fmtDate(l.until)}`, trial:`bandomoji, liko ${daysLeft(l.until)} d.`,
-    expired:'bandomoji baigėsi', licExpired:'baigėsi'}[l.kind] || l.kind;
+    expired: l.noTrial ? 'reikia licencijos kodo' : 'bandomoji baigėsi', licExpired:'baigėsi'}[l.kind] || l.kind;
 }
 function setLic(l, code){
   curLic = l || null; if (code!==undefined) curLic && (curLic.code=code);
@@ -679,7 +680,7 @@ function setLic(l, code){
   let html='', bad=false;
   if (l2 && !l2.ok){
     bad=true;
-    html = `<span style="font-size:22px">⛔</span><span><b>Grupės licencija baigėsi</b><small>${owner?'Kalbėti negalima. Paspausk ir įvesk licencijos kodą.':'Kalbėti negalima. Kreipkis į grupės kūrėją.'}</small></span>`;
+    html = `<span style="font-size:22px">⛔</span><span><b>${l2.noTrial?'Reikia licencijos kodo':'Grupės licencija baigėsi'}</b><small>${l2.noTrial&&owner?'Šiame telefone bandomasis laikotarpis jau išnaudotas. Paspausk ir įvesk kodą.':owner?'Kalbėti negalima. Paspausk ir įvesk licencijos kodą.':'Kalbėti negalima. Kreipkis į grupės kūrėją.'}</small></span>`;
   } else if (l2 && owner && l2.kind==='trial' && daysLeft(l2.until)<=7){
     html = `<span style="font-size:22px">🎫</span><span><b>Bandomasis laikotarpis: liko ${daysLeft(l2.until)} d.</b><small>Paspausk, kad įvestum licencijos kodą</small></span>`;
   } else if (l2 && owner && l2.kind==='lic' && daysLeft(l2.until)<=14){
