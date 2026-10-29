@@ -68,13 +68,15 @@ input:focus{border-color:var(--accent)}
 .dot{width:10px;height:10px;border-radius:50%;background:var(--busy);flex:none}
 .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
 .chTitle{font-weight:800;font-size:18px;display:flex;align-items:center;gap:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-#status{height:52px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
+#status{height:46px;border-radius:14px;background:var(--panel);border:1px solid var(--line);
   display:flex;align-items:center;justify-content:center;font-weight:600;transition:.15s;padding:0 10px;text-align:center}
 #status.rx{background:rgba(63,169,245,.15);border-color:var(--rx);color:var(--rx)}
 #status.tx{background:rgba(255,138,31,.15);border-color:var(--accent);color:var(--accent)}
 #status.busy{background:rgba(231,76,60,.15);border-color:var(--busy);color:var(--busy)}
-#pttWrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:220px}
-#ptt{width:min(60vw,230px);height:min(60vw,230px);border-radius:50%;border:0;
+#pttWrap{flex:0 0 auto;display:flex;align-items:center;justify-content:center;padding:10px 0 2px}
+#scrChan{overflow-y:auto}
+#scrChan>*{flex-shrink:0}
+#ptt{width:clamp(110px,min(48vw,20vh),210px);height:clamp(110px,min(48vw,20vh),210px);border-radius:50%;border:0;
   background:radial-gradient(circle at 35% 30%,var(--accent2),var(--accent) 60%,#c25d00);
   color:#1a1a1a;font-size:20px;font-weight:800;letter-spacing:1px;
   box-shadow:0 10px 40px rgba(255,138,31,.35),inset 0 -6px 0 rgba(0,0,0,.2);
@@ -86,7 +88,7 @@ input:focus{border-color:var(--accent)}
 #users{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:6px 10px;border-radius:20px;background:var(--panel);border:1px solid var(--line);font-size:13px}
 .chip.talk{border-color:var(--rx);color:var(--rx)}
-#hist{list-style:none;margin:0;padding:0 0 16px;overflow-y:auto;max-height:30vh}
+#hist{list-style:none;margin:0;padding:0 0 16px;overflow-y:auto;flex:1 1 0;min-height:130px}
 #hist li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;
   background:var(--panel);border:1px solid var(--line);margin-bottom:6px}
 #hist li .who{flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -127,6 +129,7 @@ input:focus{border-color:var(--accent)}
 #licBar.bad{border-color:var(--busy);background:rgba(231,76,60,.15)}
 body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#meetCard,#timerCard,#users,#hist){opacity:.2;pointer-events:none;filter:grayscale(1)}
 #licBar b{display:block;font-size:15px}#licBar small{display:block;color:var(--muted);font-size:13px}
+#licBar.slim{padding:7px 12px;font-size:14px}#licBar.slim b{display:inline;font-size:14px}#licBar.slim small{display:inline;margin-left:6px}
 .licTag{font-size:12px;padding:2px 8px;border-radius:8px;background:var(--panel);margin-left:6px;color:var(--muted)}
 .licTag.ok{color:var(--ok)}.licTag.bad{color:var(--busy)}
 .licCode{font:600 17px ui-monospace,monospace;letter-spacing:1px}
@@ -199,10 +202,10 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 #updBar .ut b{display:block;font-size:15px}
 #updBar .ut small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
 #updBar .ub{flex:none;padding:9px 12px;border-radius:10px;background:var(--rx);color:#001018;font-weight:800;font-size:14px}
-#timerCard{margin-top:10px;padding:12px 14px;border-radius:14px;background:var(--panel);border:1px solid rgba(63,169,245,.45);cursor:pointer}
+#timerCard{margin-top:8px;padding:8px 14px;border-radius:14px;background:var(--panel);border:1px solid rgba(63,169,245,.45);cursor:pointer}
 #timerCard .tTop{display:flex;justify-content:space-between;gap:10px;font-size:14px;color:var(--muted)}
 #timerCard #tTitle{color:var(--text);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#tLeft{font-size:38px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums;margin:2px 0 8px;color:var(--rx)}
+#tLeft{font-size:30px;font-weight:800;letter-spacing:1px;font-variant-numeric:tabular-nums;margin:2px 0 8px;color:var(--rx)}
 .tBar{height:8px;border-radius:6px;background:var(--line);overflow:hidden}
 .tBar i{display:block;height:100%;width:0;background:var(--rx);transition:width .5s linear}
 #timerCard.warn{border-color:rgba(255,138,31,.6)} #timerCard.warn #tLeft{color:var(--accent)} #timerCard.warn .tBar i{background:var(--accent)}
@@ -544,7 +547,7 @@ function onMsg(ev){
       } else toast(m.msg);
       break;
     case 'presence':
-      talkerName=m.talker; me=m.me;
+      talkerName=m.talker; me=m.me; if (cur) setLic(curLic);
       if (cur && cur.owner!==m.me.owner){ cur.owner=m.me.owner; upsertSaved({name:cur.name, owner:cur.owner}); renderChSub(); setLic(curLic); }
       renderUsers(m.users); updateStatus(); break;
     case 'toast': toast(m.msg); break;
@@ -686,12 +689,12 @@ function setLic(l, code){
   if (l2 && !l2.ok){
     bad=true;
     html = `<span style="font-size:22px">⛔</span><span><b>${l2.noTrial?'Reikia licencijos kodo':'Grupės licencija baigėsi'}</b><small>${l2.noTrial&&owner?'Šiame telefone bandomasis laikotarpis jau išnaudotas. Paspausk ir įvesk kodą.':owner?'Kalbėti negalima. Paspausk ir įvesk licencijos kodą.':'Kalbėti negalima. Kreipkis į grupės kūrėją.'}</small></span>`;
-  } else if (l2 && owner && l2.kind==='trial' && daysLeft(l2.until)<=7){
-    html = `<span style="font-size:22px">🎫</span><span><b>Bandomasis laikotarpis: liko ${daysLeft(l2.until)} d.</b><small>Paspausk, kad įvestum licencijos kodą</small></span>`;
-  } else if (l2 && owner && l2.kind==='lic' && daysLeft(l2.until)<=14){
-    html = `<span style="font-size:22px">🎫</span><span><b>Licencija baigiasi po ${daysLeft(l2.until)} d.</b><small>${esc(l2.org||'')} · pratęsk, kad grupė veiktų toliau</small></span>`;
+  } else if (l2 && owner && !me.admin && l2.kind==='trial' && daysLeft(l2.until)<=7){
+    html = `<span>🎫</span><span><b>Bandomoji: liko ${daysLeft(l2.until)} d.</b><small>Įvesti kodą ›</small></span>`;
+  } else if (l2 && owner && !me.admin && l2.kind==='lic' && daysLeft(l2.until)<=14){
+    html = `<span>🎫</span><span><b>Licencija: liko ${daysLeft(l2.until)} d.</b><small>Pratęsti ›</small></span>`;
   }
-  b.innerHTML=html; b.classList.toggle('hidden', !html); b.classList.toggle('bad', bad);
+  b.innerHTML=html; b.classList.toggle('hidden', !html); b.classList.toggle('bad', bad); b.classList.toggle('slim', !!html && !bad);
   document.body.classList.toggle('licLocked', licLocked());
   b.onclick = owner ? licModal : null;
 }
