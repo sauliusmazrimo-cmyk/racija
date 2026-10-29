@@ -13,6 +13,7 @@
     L|0..255  F|0/1  D|laipsniai  O|laipsniai – ryškumas, apversti 180°, magnetinė deklinacija, pataisa
     P                                   – būsenos užklausa
   Monoklis kas 2 s praneša: S|kryptis|tikslumas0-3|baterija_mV|kalibruota|versija
+  Kalbėjimo (PTT) mygtukas tarp D1 ir GND: B|1 paspaustas, B|0 atleistas
 
   Laidai: OLED ir BNO085: 3V3, GND, SDA=D4, SCL=D5.  BNO085: INT=D2, RST=D3.
   Baterijos įtampa (nebūtina): BAT+ (po jungikliu) –100k– A0 –100k– GND.
@@ -31,7 +32,8 @@
 #define RX_UUID  "7a1e0002-3110-4c48-9f0b-6d6f6e6f6b6c"
 #define TX_UUID  "7a1e0003-3110-4c48-9f0b-6d6f6e6f6b6c"
 
-const int PIN_INT = D2, PIN_RST = D3, PIN_BAT = A0;
+const int PIN_INT = D2, PIN_RST = D3, PIN_BAT = A0, PIN_BTN = D1;
+bool btnDown = false;
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C oled(U8G2_R0, U8X8_PIN_NONE);
 BNO08x imu;
@@ -412,6 +414,7 @@ void drawAlarm() {
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_BAT, INPUT);
+  pinMode(PIN_BTN, INPUT_PULLUP);
   analogReadResolution(12);
   loadPrefs();
 
@@ -457,6 +460,15 @@ void loop() {
   imuPoll();
   battPoll();
 
+  // PTT mygtukas (su 25 ms apsauga nuo kontaktų „šokinėjimo“)
+  static uint32_t btnChange = 0; static bool btnRaw = false;
+  bool raw = digitalRead(PIN_BTN) == LOW;
+  if (raw != btnRaw) { btnRaw = raw; btnChange = millis(); }
+  if (raw != btnDown && millis() - btnChange > 25) {
+    btnDown = raw;
+    if (connected && txC) { const char *b = btnDown ? "B|1" : "B|0"; txC->setValue((uint8_t *)b, 3); txC->notify(); }
+  }
+
   static uint32_t lastNotify = 0;
   if (millis() - lastNotify > 2000) { lastNotify = millis(); notifyStatus(); }
   if (alarmOn && millis() - alarmAt > 30000) alarmOn = false;
@@ -468,5 +480,9 @@ void loop() {
   if (alarmOn) drawAlarm();
   else if (millis() < msgUntil) drawMsg();
   else drawNav();
+  if (btnDown) {                                       // kalbi – žymė viršuje kairėje
+    oled.setDrawColor(1); oled.drawBox(0, 0, 40, 11); oled.setDrawColor(0);
+    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(3, 9, connected ? "KALBI" : "BT --"); oled.setDrawColor(1);
+  }
   oled.sendBuffer();
 }

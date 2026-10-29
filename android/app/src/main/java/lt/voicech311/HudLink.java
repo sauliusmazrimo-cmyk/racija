@@ -43,7 +43,7 @@ public class HudLink {
     static final UUID TX   = UUID.fromString("7a1e0003-3110-4c48-9f0b-6d6f6e6f6b6c");
     static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    public interface Listener { void onHudStatus(); }
+    public interface Listener { void onHudStatus(); default void onHudButton(boolean down) {} }
 
     private final Context ctx;
     private final Listener listener;
@@ -296,6 +296,7 @@ public class HudLink {
         private void onStatus(byte[] v) {
             if (v == null) return;
             final String s = new String(v, StandardCharsets.UTF_8);
+            if (s.startsWith("B|")) { final boolean down = s.startsWith("B|1"); h.post(() -> listener.onHudButton(down)); return; }
             h.post(() -> {
                 boolean changed = !s.equals(lastStatus);
                 lastStatus = s; lastStatusAt = System.currentTimeMillis();

@@ -85,7 +85,10 @@ public class VoiceService extends Service {
             @Override public void onMeshText(String text, long from) { handleMeshText(text); }
             @Override public void onMeshStatus() { MainActivity.meshStatus(mesh.info().toString()); }
         });
-        hud = new HudLink(this, () -> MainActivity.hudStatus(hud.info().toString()));
+        hud = new HudLink(this, new HudLink.Listener() {
+            @Override public void onHudStatus() { MainActivity.hudStatus(hud.info().toString()); }
+            @Override public void onHudButton(boolean down) { MainActivity.ptt(down ? "down" : "up"); }  // laidinis PTT mygtukas prie monoklio
+        });
     }
 
     // ---------- monoklis ----------
