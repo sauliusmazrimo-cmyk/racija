@@ -122,6 +122,7 @@ input:focus{border-color:var(--accent)}
 .adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
 #licBar{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;padding:10px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);color:var(--fg);font:inherit;text-align:left}
 #licBar.bad{border-color:var(--busy);background:rgba(231,76,60,.15)}
+body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#meetCard,#timerCard,#users,#hist){opacity:.2;pointer-events:none;filter:grayscale(1)}
 #licBar b{display:block;font-size:15px}#licBar small{display:block;color:var(--muted);font-size:13px}
 .licTag{font-size:12px;padding:2px 8px;border-radius:8px;background:var(--panel);margin-left:6px;color:var(--muted)}
 .licTag.ok{color:var(--ok)}.licTag.bad{color:var(--busy)}
@@ -666,6 +667,7 @@ $('chList').addEventListener('click', async e=>{
 
 // ---------- licencija ----------
 let curLic=null;
+const licLocked = () => !!(cur && curLic && !curLic.ok && !me.admin);
 const fmtDate = ts => new Date(ts).toLocaleDateString('lt-LT');
 const daysLeft = ts => Math.max(0, Math.ceil((ts-Date.now())/86400000));
 function licLabel(l){
@@ -687,6 +689,7 @@ function setLic(l, code){
     html = `<span style="font-size:22px">🎫</span><span><b>Licencija baigiasi po ${daysLeft(l2.until)} d.</b><small>${esc(l2.org||'')} · pratęsk, kad grupė veiktų toliau</small></span>`;
   }
   b.innerHTML=html; b.classList.toggle('hidden', !html); b.classList.toggle('bad', bad);
+  document.body.classList.toggle('licLocked', licLocked());
   b.onclick = owner ? licModal : null;
 }
 function licModal(){
@@ -968,6 +971,11 @@ $('inviteBtn').onclick = () => {
 
 $('menuBtn').onclick = () => {
   const o = cur.owner;
+  if (licLocked()){
+    if (o) return licModal();
+    openModal(`<h2>⛔ Grupė užrakinta</h2><p class="muted">Grupės licencija baigėsi, todėl visos funkcijos išjungtos. Kreipkis į grupės kūrėją.</p><button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+    return;
+  }
   openModal(`<h2>#${esc(cur.name)}</h2>
     <button class="menuItem" id="miNoisy">🎧<span>Triukšminga aplinka: <b style="color:${noisy?'var(--ok)':'var(--muted)'}">${noisy?'ĮJUNGTA':'IŠJUNGTA'}</b><small>Šūviai nesustiprinami, balsas aiškesnis su BT ausinėmis</small></span></button>
     <button class="menuItem" id="miMap">🗺️<span>Žemėlapis<small>Kur yra kanalo nariai (rodo tik įsijungę)</small></span></button>
@@ -1521,6 +1529,7 @@ function seenCid(cid){            // true, jei naujas
   return true;
 }
 function sendCmd(c){
+  if (licLocked()){ flash('Licencija baigėsi'); return; }
   const online = ws && ws.readyState===1 && cur && scrVisible('scrChan');
   const lora = meshReady();
   if (!online && !lora){ flash('Nėra ryšio'); return; }
@@ -1702,6 +1711,7 @@ function meshRefresh(){
 }
 window.nativeMeshStatus = () => meshRefresh();
 window.nativeMesh = (raw, alarmHandled) => {
+  if (licLocked()) return;
   const m = raw.trim().match(/^(🚨|📢)\s*(.+?)\s+·\s+(.+?)\s+#([0-9a-z]{6})$/u);
   let alarm, text, from='LoRa', cid=null;
   if (m){ alarm=m[1]==='🚨'; text=m[2]; from=m[3]; cid=m[4]; }
@@ -1767,10 +1777,11 @@ const HUD_LABEL = {off:'Neprijungtas', no_perm:'Reikia Bluetooth leidimo', bt_of
   connected:'Prijungtas', not_hud:'Tai ne monoklis', disconnected:'Ryšys nutrūko, jungiamasi iš naujo…', no_service:'Paleidžiama…'};
 const hudClean = t => String(t||'').replace(/[|\r\n]+/g,' ').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu,'').replace(/\s+/g,' ').trim().slice(0,150);
 function hudSend(line){ if (!hudReady()) return false; try{ return Native311.hudSend(line); }catch{ return false; } }
-function hudMsg(kind, text, from){ hudSend(`${kind}|${hudClean(text)}|${hudClean(from)}`); }
+function hudMsg(kind, text, from){ if (licLocked()) return; hudSend(`${kind}|${hudClean(text)}|${hudClean(from)}`); }
 let hudLastTalker=null, hudCal=0;
 function hudTick(){
   if (!hudReady()) { hudLastTalker=null; return; }
+  if (licLocked()){ hudSend('N|-1'); hudSend('R|'); return; }
   if (meet && myPos) hudSend(`N|${bearing(myPos,meet).toFixed(0)}|${distM(myPos,meet).toFixed(0)}|${hudClean(meet.title).slice(0,30)}`);
   else hudSend('N|-1');
   const now=sNow(), mates=(locs||[]).filter(l=>l.id!==myLocId && now-l.ts<10*60000);

@@ -282,7 +282,13 @@ const licOk = (ws) => ws.isAdmin || !ws.chan || licStatus(ws.chan).ok;
 function licDenied(ws) {
   return err(ws, 'license', canManage(ws) ? 'Grupės licencija baigėsi. Meniu ⋯ → 🎫 Licencija įvesk kodą.' : 'Grupės licencija baigėsi. Kreipkis į grupės kūrėją.');
 }
-function pushLic(name) { if (live.has(name)) broadcast(name, { t: 'lic', lic: licStatus(name) }); }
+function pushLic(name) {
+  const c = live.get(name); if (!c) return;
+  const st = licStatus(name);
+  if (c.licOk === false && st.ok) { c.licOk = true; for (const w of [...c.clients]) attach(w, name); return; } // atrakinta – iš naujo atsiunčiam istoriją
+  c.licOk = st.ok;
+  broadcast(name, { t: 'lic', lic: st });
+}
 function pushLicAll() { for (const name of live.keys()) pushLic(name); }
 function adminLicView() {
   const used = {};
@@ -315,7 +321,11 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, meet: db.channels[name].meet || null, now: Date.now(), locId: locId(ws), locs: locList(rt(name)), lic: licStatus(name) });
+  const lic = licStatus(name), shut = !lic.ok && !ws.isAdmin, chn = db.channels[name];
+  rt(name).licOk = lic.ok;
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!chn.public, ticket: ws.ticket,
+    history: shut ? [] : chn.history, timer: shut ? null : timerView(chn), timerCode: !!chn.timerCode, meet: shut ? null : (chn.meet || null),
+    now: Date.now(), locId: locId(ws), locs: shut ? [] : locList(rt(name)), lic });
   presence(name);
 }
 
@@ -703,6 +713,7 @@ app.get('/audio/:id', (req, res) => {
   if (!t || t.until < Date.now()) return fail('ticket');
   const ch = db.channels[t.chan];
   if (!ch || !ch.history.some(h => h.id === id)) return fail('deleted');
+  if (!licStatus(t.chan).ok) return fail('license');
   fs.readFile(audioFile(id), (e, data) => {
     if (e) return fail('file');
     try { data = decAudio(data); } catch { return fail('decrypt'); }
