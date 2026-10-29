@@ -1732,7 +1732,7 @@ function renderHudModal(){
     <button class="menuItem" id="hFlip">🔄<span>Apversti vaizdą 180°: <b>${flip?'TAIP':'NE'}</b><small>Jei monoklis ant kitos akies ir vaizdas aukštyn kojom</small></span></button>
     <button class="btn" id="hTest">Rodyti bandomąją žinutę</button>`:''}
     ${st.state!=='off'?`<button class="btn danger" id="hOff">Atjungti monoklį</button>`:''}
-    <p class="muted" style="font-size:13px">Monoklis rodo rodyklę ir atstumą iki 🚩 susitikimo vietos, kas kalba, greitas komandas, LoRa žinutes ir STOP. Programą į monoklį įrašysi kompiuteriu: <b>racija-production.up.railway.app/monoklis</b></p>
+    <p class="muted" style="font-size:13px">Monoklis rodo kryptį ir atstumą iki 🚩 taško.</p>
     <button class="btn alt" onclick="closeModal()">Uždaryti</button>`;
   if ($('hScan')) $('hScan').onclick = () => { try{ Native311.hudScan(); }catch{} };
   $('modalBox').querySelectorAll('.hudDev').forEach(b=>b.onclick=()=>{ Native311.hudConnect(b.dataset.a); toast('Jungiamasi…'); });
