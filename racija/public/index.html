@@ -120,6 +120,13 @@ input:focus{border-color:var(--accent)}
 .adMeta{font-size:12px;margin:2px 0 10px}
 .adBtns{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:6px}
 .adBtns .btn{padding:10px 6px;font-size:14px;margin:0}
+#licBar{display:flex;align-items:center;gap:10px;width:100%;margin-top:10px;padding:10px 14px;border-radius:14px;background:var(--panel);border:1px solid var(--line);color:var(--fg);font:inherit;text-align:left}
+#licBar.bad{border-color:var(--busy);background:rgba(231,76,60,.15)}
+#licBar b{display:block;font-size:15px}#licBar small{display:block;color:var(--muted);font-size:13px}
+.licTag{font-size:12px;padding:2px 8px;border-radius:8px;background:var(--panel);margin-left:6px;color:var(--muted)}
+.licTag.ok{color:var(--ok)}.licTag.bad{color:var(--busy)}
+.licCode{font:600 17px ui-monospace,monospace;letter-spacing:1px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 /* komandos */
 #cmdBar{margin-top:10px}
 #stopBtn{position:relative;overflow:hidden;width:100%;height:58px;border:0;border-radius:14px;background:#7a1d16;color:#fff;
@@ -293,6 +300,7 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
     <div id="tLeft">0:00:00</div>
     <div class="tBar"><i id="tFill"></i></div>
   </div>
+  <button id="licBar" class="hidden"></button>
   <button id="meetCard" class="hidden"><span class="mf">🚩</span><span class="mt2"><b id="mtTitle"></b><small id="mtInfo"></small></span><span id="mtArrow">↑</span></button>
   <div id="cmdBar">
     <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
@@ -504,6 +512,7 @@ function onMsg(ev){
       enterChannelUI(m.history);
       cur.timerCode = !!m.timerCode; setTimerState(m.timer, m.now);
       myLocId = m.locId; setLocs(m.locs||[]); setMeet(m.meet); resumeSharing();
+      setLic(m.lic);
       break;
     }
     case 'error':
@@ -531,9 +540,17 @@ function onMsg(ev){
       break;
     case 'presence':
       talkerName=m.talker; me=m.me;
-      if (cur && cur.owner!==m.me.owner){ cur.owner=m.me.owner; upsertSaved({name:cur.name, owner:cur.owner}); renderChSub(); }
+      if (cur && cur.owner!==m.me.owner){ cur.owner=m.me.owner; upsertSaved({name:cur.name, owner:cur.owner}); renderChSub(); setLic(curLic); }
       renderUsers(m.users); updateStatus(); break;
     case 'toast': toast(m.msg); break;
+    case 'lic':
+      setLic(m.lic, m.code);
+      if (pending && pending.lic){ pending=null; if (m.lic && m.lic.kind==='lic') closeModal(); else if ($('licModalMark')) licModal(); }
+      break;
+    case 'adminLic':
+      if (m.msg) toast(m.msg);
+      if (m.msg && /^Sukurtas kodas /.test(m.msg)){ const c=m.msg.replace('Sukurtas kodas ',''); try{ navigator.clipboard.writeText(c); }catch{} }
+      renderLicAdmin(m); break;
     case 'adminOk':
       if (pending && pending.adminAuth){ adminKey=pending.key; store.set('racija_admin',adminKey); pending=null; wsSend({t:'adminList'}); }
       break;
@@ -646,6 +663,85 @@ $('chList').addEventListener('click', async e=>{
   wsSend(joinMsg(c));
 });
 
+// ---------- licencija ----------
+let curLic=null;
+const fmtDate = ts => new Date(ts).toLocaleDateString('lt-LT');
+const daysLeft = ts => Math.max(0, Math.ceil((ts-Date.now())/86400000));
+function licLabel(l){
+  if (!l) return '';
+  return {off:'nemokama', free:'nemokama', lic:`${l.org||'licencija'} iki ${fmtDate(l.until)}`, trial:`bandomoji, liko ${daysLeft(l.until)} d.`,
+    expired:'bandomoji baigėsi', licExpired:'baigėsi'}[l.kind] || l.kind;
+}
+function setLic(l, code){
+  curLic = l || null; if (code!==undefined) curLic && (curLic.code=code);
+  const b=$('licBar'); if (!b) return;
+  const owner = cur && cur.owner, l2=curLic;
+  let html='', bad=false;
+  if (l2 && !l2.ok){
+    bad=true;
+    html = `<span style="font-size:22px">⛔</span><span><b>Grupės licencija baigėsi</b><small>${owner?'Kalbėti negalima. Paspausk ir įvesk licencijos kodą.':'Kalbėti negalima. Kreipkis į grupės kūrėją.'}</small></span>`;
+  } else if (l2 && owner && l2.kind==='trial' && daysLeft(l2.until)<=7){
+    html = `<span style="font-size:22px">🎫</span><span><b>Bandomasis laikotarpis: liko ${daysLeft(l2.until)} d.</b><small>Paspausk, kad įvestum licencijos kodą</small></span>`;
+  } else if (l2 && owner && l2.kind==='lic' && daysLeft(l2.until)<=14){
+    html = `<span style="font-size:22px">🎫</span><span><b>Licencija baigiasi po ${daysLeft(l2.until)} d.</b><small>${esc(l2.org||'')} · pratęsk, kad grupė veiktų toliau</small></span>`;
+  }
+  b.innerHTML=html; b.classList.toggle('hidden', !html); b.classList.toggle('bad', bad);
+  b.onclick = owner ? licModal : null;
+}
+function licModal(){
+  const l=curLic||{};
+  openModal(`<div id="licModalMark"></div><h2>🎫 Grupės licencija</h2>
+    <div class="meshCard ${l.ok?'ok':''}" style="margin-bottom:14px;${l.ok?'':'border-color:var(--busy)'}"><span class="mi">🎫</span><span class="mt"><b>${esc(licLabel(l))}</b>
+      <small>${l.kind==='lic'?`${l.maxUsers?`iki ${l.maxUsers} prisijungusių vienu metu`:'vartotojų skaičius neribojamas'}`:l.kind==='trial'?`galioja iki ${fmtDate(l.until)}`:l.ok?'':'kalbėti, siųsti komandas ir rodyti vietą negalima'}</small></span></div>
+    <div class="field"><label>Licencijos kodas</label><input id="mLic" placeholder="VC-XXXX-XXXX" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase;font-family:ui-monospace,monospace"></div>
+    <button class="btn" id="mOk">Aktyvuoti</button>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button><div class="err" id="mErr"></div>
+    <p class="muted" style="font-size:13px">Kodą gausi įsigijęs licenciją. Vienas kodas veikia visai grupei – nariams nieko daryti nereikia.</p>`);
+  $('mOk').onclick = () => { const c=$('mLic').value.trim(); if (c.length<8){ $('mErr').textContent='Įvesk visą kodą'; return; }
+    $('mOk').disabled=true; pending={lic:true}; wsSend({t:'licApply', code:c}); };
+}
+function renderLicAdmin(d){
+  if ($('modal').classList.contains('hidden')) openModal('');
+  const now=Date.now();
+  $('modalBox').innerHTML = `<h2>🎫 Licencijos</h2>
+    <button class="menuItem" id="lOn">${d.enabled?'🔒':'🔓'}<span>Licencijavimas: <b style="color:${d.enabled?'var(--ok)':'var(--muted)'}">${d.enabled?'ĮJUNGTAS':'IŠJUNGTAS'}</b>
+      <small>${d.enabled?'Grupės be licencijos po bandomojo laikotarpio užrakinamos':'Visos grupės veikia nemokamai. Įjungus – esamoms grupėms prasidės bandomasis laikotarpis'}</small></span></button>
+    <div class="field"><label>Bandomasis laikotarpis naujoms grupėms (dienomis)</label><input id="lTrial" type="number" min="0" max="365" value="${d.trialDays}"></div>
+    <div class="sec"><span>Naujas kodas</span></div>
+    <div class="field"><label>Organizacija (kam parduodi)</label><input id="lOrg" maxlength="60" placeholder="pvz. Šaudykla Juodas Gandras"></div>
+    <div class="grid2">
+      <div class="field"><label>Vartotojų vienu metu (0 = be ribos)</label><input id="lUsers" type="number" min="0" value="10"></div>
+      <div class="field"><label>Grupių su šiuo kodu</label><input id="lCh" type="number" min="1" value="1"></div>
+    </div>
+    <div class="field"><label>Galiojimas</label><select id="lMon"><option value="1">1 mėn.</option><option value="3">3 mėn.</option><option value="6">6 mėn.</option><option value="12" selected>12 mėn.</option><option value="24">24 mėn.</option></select></div>
+    <div class="field"><label>Pastaba (tik tau)</label><input id="lNote" maxlength="120" placeholder="kontaktas, sąskaitos nr."></div>
+    <button class="btn" id="lNew">Sukurti kodą</button>
+    <div class="sec"><span>Kodai (${d.codes.length})</span></div>
+    ${d.codes.map(c=>`<div class="adRow" data-c="${esc(c.code)}">
+      <div class="adTop"><b>${esc(c.org)}</b><span class="licTag ${c.until>now?'ok':'bad'}">${c.until>now?'iki '+fmtDate(c.until):'baigėsi '+fmtDate(c.until)}</span></div>
+      <div class="licCode">${esc(c.code)}</div>
+      <div class="muted adMeta">${c.maxUsers?c.maxUsers+' vart.':'be ribos'} · grupės ${c.channels.length}/${c.maxChannels}${c.channels.length?': '+c.channels.map(n=>'#'+esc(n)).join(', '):''}${c.note?' · '+esc(c.note):''}</div>
+      <div class="adBtns"><button class="btn alt" data-a="copy">Kopijuoti</button><button class="btn alt" data-a="m1">+1 mėn</button><button class="btn alt" data-a="m12">+12 mėn</button><button class="btn danger" data-a="del">🗑️</button></div>
+    </div>`).join('') || '<p class="muted">Kodų dar nėra.</p>'}
+    <div class="sec"><span>Grupės</span></div>
+    ${(d.channels||[]).map(c=>`<div class="adRow"><div class="adTop"><b>#${esc(c.name)}</b><span class="licTag ${c.lic.ok?'ok':'bad'}">${esc(licLabel(c.lic))}</span></div>
+      <button class="btn ${c.free?'':'alt'}" data-free="${esc(c.name)}" data-on="${c.free?0:1}" style="margin:6px 0 0">${c.free?'⭐ Nemokama visam laikui – atšaukti':'Padaryti nemokamą (savo grupėms)'}</button></div>`).join('')}
+    <button class="btn alt" id="lBack">Atgal</button>`;
+  $('lOn').onclick = () => wsSend({t:'adminLicSet', enabled:!d.enabled});
+  $('lTrial').onchange = e => wsSend({t:'adminLicSet', trialDays:+e.target.value});
+  $('lNew').onclick = () => { const org=$('lOrg').value.trim(); if(!org){ toast('Įrašyk organizaciją'); return; }
+    wsSend({t:'adminLicCreate', org, maxUsers:+$('lUsers').value, maxChannels:+$('lCh').value, months:+$('lMon').value, note:$('lNote').value}); };
+  $('modalBox').querySelectorAll('[data-c]').forEach(row=>{ const code=row.dataset.c;
+    row.querySelectorAll('[data-a]').forEach(b=>b.onclick=async()=>{
+      const a=b.dataset.a;
+      if (a==='copy'){ try{ await navigator.clipboard.writeText(code); toast('Nukopijuota: '+code); }catch{ toast(code); } }
+      else if (a==='del'){ if (b.dataset.sure){ wsSend({t:'adminLicDelete', code}); } else { b.dataset.sure=1; b.textContent='Tikrai?'; } }
+      else wsSend({t:'adminLicExtend', code, months: a==='m1'?1:12});
+    }); });
+  $('modalBox').querySelectorAll('[data-free]').forEach(b=>b.onclick=()=>wsSend({t:'adminFree', channel:b.dataset.free, on:b.dataset.on==='1'}));
+  $('lBack').onclick = () => wsSend({t:'adminList'});
+}
+
 // ---------- administratorius ----------
 $('adminBtn').onclick = () => adminKey ? openAdmin() : adminLogin();
 function adminLogin(){
@@ -680,7 +776,7 @@ function renderAdmin(list){
   $('modalBox').innerHTML = `<h2>🛡️ Visi kanalai (${list.length})</h2>
     ${list.length ? list.map(c=>`
       <div class="adRow" data-n="${esc(c.name)}">
-        <div class="adTop"><b>#${esc(c.name)}</b>${c.online?`<span class="on">● ${c.online}</span>`:''}</div>
+        <div class="adTop"><b>#${esc(c.name)}</b>${c.online?`<span class="on">● ${c.online}</span>`:''}${c.lic&&c.lic.kind!=='off'?`<span class="licTag ${c.lic.ok?'ok':'bad'}">${esc(licLabel(c.lic))}</span>`:''}</div>
         <div class="muted adMeta">Sukurtas ${fmt(c.created)} · ${c.msgs} įr. · ${c.owners} kūr.</div>
         <div class="adBtns">
           <button class="btn" data-a="enter">Įeiti</button>
@@ -689,10 +785,12 @@ function renderAdmin(list){
           <button class="btn danger" data-a="del">🗑️</button>
         </div>
       </div>`).join('') : '<p class="muted">Kanalų dar nėra.</p>'}
+    <button class="btn" id="mLicAdm">🎫 Licencijos</button>
     <button class="btn alt" id="mRefresh">Atnaujinti</button>
     <button class="btn danger" id="mAdminOut">Išeiti iš administratoriaus režimo</button>
     <button class="btn alt" onclick="closeModal()">Uždaryti</button>`;
   $('mRefresh').onclick = () => wsSend({t:'adminList'});
+  $('mLicAdm').onclick = () => { $('modalBox').innerHTML='<h2>🎫 Licencijos</h2><div class="muted">Kraunama…</div>'; wsSend({t:'adminLic'}); };
   $('mAdminOut').onclick = () => {
     adminKey=''; store.del('racija_admin');
     saved=saved.filter(c=>!c.viaAdmin || c.pw); saved.forEach(c=>c.viaAdmin=false); saveList();
@@ -835,7 +933,7 @@ function enterChannelUI(history){
   renderHistEmpty();
   keepAwake();
 }
-$('backBtn').onclick = () => { setTimerState(null); pauseSharing(); closeMap(); setLocs([]); setMeet(null); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
+$('backBtn').onclick = () => { setTimerState(null); setLic(null); pauseSharing(); closeMap(); setLocs([]); setMeet(null); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
 
 function renderChSub(){
   $('chSub').textContent = (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
@@ -877,6 +975,7 @@ $('menuBtn').onclick = () => {
     ${NATIVE?`<button class="menuItem" id="miHud">👓<span>Monoklis: ${esc(HUD_LABEL[hudState.state]||'')}<small>Rodyklė į susitikimo vietą, komandos ir STOP prie akies</small></span></button>`:''}
     ${NATIVE?`<button class="menuItem" id="miMesh">📡<span>LoRa (Meshtastic): ${esc(MESH_LABEL[meshState.state]||'')}<small>STOP ir komandos be interneto</small></span></button>`:''}
     <button class="menuItem" id="miMine">🧹<span>Išvalyti istoriją sau<small>Paslėps senas žinutes tik šiame telefone</small></span></button>
+    ${o && curLic && curLic.kind!=='off'?`<button class="menuItem" id="miLic">🎫<span>Licencija: <b style="color:${curLic.ok?'var(--ok)':'var(--busy)'}">${esc(licLabel(curLic))}</b><small>Įvesti arba pakeisti grupės licencijos kodą</small></span></button>`:''}
     ${o?`<button class="menuItem" id="miAll">🗑️<span>Išvalyti istoriją visiems<small>Įrašai bus ištrinti iš serverio</small></span></button>
     <button class="menuItem" id="miPub">${cur.public?'👁️':'🙈'}<span>Bendrame sąraše: <b style="color:${cur.public?'var(--ok)':'var(--muted)'}">${cur.public?'RODOMA':'PASLĖPTA'}</b><small>Ar kiti mato šios grupės pavadinimą lange „Prisijungti“</small></span></button>
     <button class="menuItem" id="miPw">🔑<span>Keisti slaptažodį<small>Seni kvietimai nebegalios</small></span></button>
@@ -893,6 +992,7 @@ $('menuBtn').onclick = () => {
   $('miMap').onclick = () => { closeModal(); openMap(); };
   if ($('miMesh')) $('miMesh').onclick = () => meshModal();
   if ($('miHud')) $('miHud').onclick = () => hudModal();
+  if ($('miLic')) $('miLic').onclick = () => licModal();
   $('miMine').onclick = () => {
     upsertSaved({name:cur.name, hiddenBefore:Date.now()});
     $('hist').innerHTML=''; renderHistEmpty(); closeModal(); toast('Istorija išvalyta šiame telefone');
@@ -924,6 +1024,7 @@ function pttDown(e){
   e.preventDefault();
   if (ptt.classList.contains('down')) return;
   if (talkerName && talkerName!==myName){ vib([60,40,60]); flash(`Užimta: kalba ${talkerName}`); return; }
+  if (curLic && !curLic.ok && !me.admin){ vib([60,40,60]); flash('Licencija baigėsi'); if (cur && cur.owner) licModal(); return; }
   if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
   ptt.classList.add('down');
   if (currentAudio) currentAudio.pause();

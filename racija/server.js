@@ -25,6 +25,7 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 let db = { seq: 0, channels: {} };
 try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch {}
 db.channels = db.channels || {};
+db.lic = db.lic || { enabled: false, enabledAt: 0, trialDays: 14, codes: {} };
 for (const ch of Object.values(db.channels)) { // migracija iš v0.2
   if (!Array.isArray(ch.owners)) ch.owners = ch.owner ? [ch.owner] : [];
   delete ch.owner;
@@ -257,6 +258,43 @@ setInterval(() => {
   }
 }, 30 * 1000);
 
+// ---------- licencijos (grupei) ----------
+const DAY = 24 * 3600000;
+const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newLicCode() {
+  const part = () => Array.from(crypto.randomBytes(4), b => CODE_ABC[b % CODE_ABC.length]).join('');
+  let c; do { c = `VC-${part()}-${part()}`; } while (db.lic.codes[c]);
+  return c;
+}
+const normLic = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^VC/, '').replace(/^(.{4})(.{4})$/, 'VC-$1-$2');
+function licStatus(name) {
+  const ch = db.channels[name];
+  if (!ch) return { ok: false, kind: 'none' };
+  if (!db.lic.enabled) return { ok: true, kind: 'off' };
+  if (ch.free) return { ok: true, kind: 'free' };
+  const L = ch.license && db.lic.codes[ch.license];
+  if (L && L.until > Date.now()) return { ok: true, kind: 'lic', org: L.org, until: L.until, maxUsers: L.maxUsers };
+  const trialEnd = Math.max(ch.created || 0, db.lic.enabledAt || 0) + db.lic.trialDays * DAY;
+  if (Date.now() < trialEnd) return { ok: true, kind: 'trial', until: trialEnd, expired: L ? L.until : undefined };
+  return { ok: false, kind: L ? 'licExpired' : 'expired', org: L ? L.org : undefined, until: L ? L.until : trialEnd };
+}
+const licOk = (ws) => ws.isAdmin || !ws.chan || licStatus(ws.chan).ok;
+function licDenied(ws) {
+  return err(ws, 'license', canManage(ws) ? 'Grupės licencija baigėsi. Meniu ⋯ → 🎫 Licencija įvesk kodą.' : 'Grupės licencija baigėsi. Kreipkis į grupės kūrėją.');
+}
+function pushLic(name) { if (live.has(name)) broadcast(name, { t: 'lic', lic: licStatus(name) }); }
+function pushLicAll() { for (const name of live.keys()) pushLic(name); }
+function adminLicView() {
+  const used = {};
+  for (const [n, c] of Object.entries(db.channels)) if (c.license) (used[c.license] = used[c.license] || []).push(n);
+  return {
+    enabled: db.lic.enabled, trialDays: db.lic.trialDays,
+    codes: Object.entries(db.lic.codes).map(([code, L]) => ({ code, ...L, channels: used[code] || [] })).sort((a, b) => b.created - a.created)
+  };
+}
+// kas valandą – pranešti apie pasibaigusias licencijas prisijungusiems
+setInterval(pushLicAll, 3600000);
+
 // ---------- laikmatis ----------
 const timerView = (ch) => ch && ch.timer ? { title: ch.timer.title, start: ch.timer.start, end: ch.timer.end, by: ch.timer.by } : null;
 function checkCode(code, ch) {
@@ -277,7 +315,7 @@ function attach(ws, name) {
   ws.ticket = crypto.randomBytes(16).toString('hex');
   tickets.set(ws.ticket, { chan: name, until: Infinity });
   rt(name).clients.add(ws);
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, meet: db.channels[name].meet || null, now: Date.now(), locId: locId(ws), locs: locList(rt(name)) });
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!db.channels[name].public, ticket: ws.ticket, history: db.channels[name].history, timer: timerView(db.channels[name]), timerCode: !!db.channels[name].timerCode, meet: db.channels[name].meet || null, now: Date.now(), locId: locId(ws), locs: locList(rt(name)), lic: licStatus(name) });
   presence(name);
 }
 
@@ -312,7 +350,7 @@ function findClient(name, id) {
 function adminList() {
   return Object.entries(db.channels).map(([name, ch]) => ({
     name, created: ch.created, online: live.has(name) ? live.get(name).clients.size : 0,
-    msgs: ch.history.length, owners: ch.owners.length
+    msgs: ch.history.length, owners: ch.owners.length, free: !!ch.free, license: ch.license || null, lic: licStatus(name)
   })).sort((a, b) => b.online - a.online || a.name.localeCompare(b.name));
 }
 
@@ -358,6 +396,9 @@ wss.on('connection', (ws, req) => {
         if (!c) return failAuth(ws, 'notfound', 'Kanalas nerastas');
         if (!checkPw(m.password || '', c)) return failAuth(ws, 'badpass', 'Neteisingas slaptažodis');
         ws.fails = 0;
+        const ls = licStatus(name), lc = live.get(name);
+        if (!ws.isAdmin && ls.kind === 'lic' && ls.maxUsers && lc && [...lc.clients].filter(w => w !== ws && !w.isAdmin).length >= ls.maxUsers)
+          return err(ws, 'full', `Grupė pilna: licencija leidžia ${ls.maxUsers} prisijungusius vienu metu`);
         setUser(ws, m);
         return attach(ws, name);
       }
@@ -371,6 +412,7 @@ wss.on('connection', (ws, req) => {
           .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name)) });
       case 'loc': {
         if (!ch) return;
+        if (!licOk(ws)) return;
         const lat = Number(m.lat), lon = Number(m.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
         const c = rt(ws.chan), now = Date.now();
@@ -388,6 +430,7 @@ wss.on('connection', (ws, req) => {
       case 'meetSet':
       case 'meetClear': {
         if (!ch) return;
+        if (!licOk(ws)) return licDenied(ws);
         if (!canManage(ws)) {
           if (!ch.timerCode) return err(ws, 'notimerperm', 'Susitikimo vietą nustato kanalo kūrėjas. Paprašyk jo valdymo kodo.');
           if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
@@ -412,6 +455,7 @@ wss.on('connection', (ws, req) => {
       case 'timerSet':
       case 'timerStop': {
         if (!ch) return;
+        if (!licOk(ws)) return licDenied(ws);
         if (!canManage(ws)) {
           if (!ch.timerCode) return err(ws, 'notimerperm', 'Laikmatį nustato kanalo kūrėjas. Paprašyk jo valdymo kodo.');
           if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
@@ -460,6 +504,7 @@ wss.on('connection', (ws, req) => {
       case 'start': {
         const c = ws.chan && live.get(ws.chan);
         if (!c) return;
+        if (!licOk(ws)) return licDenied(ws);
         if (c.talker && c.talker !== ws) return send(ws, { t: 'busy', by: c.talker.user });
         if (c.talker === ws) return send(ws, { t: 'granted', id: c.current.id });
         c.talker = ws;
@@ -475,6 +520,7 @@ wss.on('connection', (ws, req) => {
       // ----- greitos komandos ir STOP signalas -----
       case 'cmd': {
         if (!ch) return;
+        if (!licOk(ws)) return licDenied(ws);
         const now = Date.now();
         const text = String(m.text || '').trim().slice(0, 40) || 'Komanda';
         if (now - (ws.lastCmd || 0) < 800 && ws.lastCmdText === text) return; // tos pačios komandos dvigubas paspaudimas
@@ -529,6 +575,25 @@ wss.on('connection', (ws, req) => {
         return presence(ws.chan);
       }
 
+      // ----- licencija -----
+      case 'licApply': {
+        if (!ch) return;
+        if (!canManage(ws)) return err(ws, 'notowner', 'Licencijos kodą įveda grupės kūrėjas');
+        if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
+        const code = normLic(m.code), L = db.lic.codes[code];
+        if (!L) return failAuth(ws, 'badlic', 'Toks licencijos kodas nerastas');
+        if (L.until <= Date.now()) return err(ws, 'badlic', 'Šio kodo galiojimas baigėsi');
+        const usedBy = Object.entries(db.channels).filter(([n, c]) => c.license === code && n !== ws.chan).length;
+        if (usedBy >= (L.maxChannels || 1)) return err(ws, 'badlic', `Šis kodas jau naudojamas ${usedBy} grupėse (leidžiama ${L.maxChannels || 1})`);
+        ws.fails = 0;
+        ch.license = code; saveDb();
+        send(ws, { t: 'toast', msg: `🎫 Licencija aktyvuota: ${L.org}` });
+        return pushLic(ws.chan);
+      }
+      case 'licInfo':
+        if (!ch) return;
+        return send(ws, { t: 'lic', lic: licStatus(ws.chan), code: canManage(ws) ? (ch.license || null) : undefined });
+
       // ----- administratorius -----
       case 'admin':
         if (ipBlocked(ws.ip)) return err(ws, 'blocked', 'Per daug neteisingų bandymų. Pabandyk po 15 min.');
@@ -547,6 +612,52 @@ wss.on('connection', (ws, req) => {
         if (!name || !db.channels[name]) return err(ws, 'notfound', 'Kanalas nerastas');
         setUser(ws, m);
         return attach(ws, name);
+      }
+      case 'adminLic':
+        if (!ws.isAdmin) return err(ws, 'notadmin', 'Reikia administratoriaus teisių');
+        return send(ws, { t: 'adminLic', ...adminLicView(), channels: adminList() });
+      case 'adminLicSet': case 'adminLicCreate': case 'adminLicExtend': case 'adminLicDelete': case 'adminLicEdit': case 'adminFree': {
+        if (!ws.isAdmin) return err(ws, 'notadmin', 'Reikia administratoriaus teisių');
+        let msg = 'Išsaugota';
+        if (m.t === 'adminLicSet') {
+          if (m.enabled !== undefined) {
+            const on = !!m.enabled;
+            if (on && !db.lic.enabled) db.lic.enabledAt = Date.now();
+            db.lic.enabled = on; msg = on ? 'Licencijavimas įjungtas' : 'Licencijavimas išjungtas – visi naudoja nemokamai';
+          }
+          if (m.trialDays !== undefined) db.lic.trialDays = Math.max(0, Math.min(365, Math.round(Number(m.trialDays) || 0)));
+        } else if (m.t === 'adminLicCreate') {
+          const org = String(m.org || '').trim().slice(0, 60);
+          if (!org) return err(ws, 'badorg', 'Įrašyk organizacijos pavadinimą');
+          const months = Math.max(1, Math.min(60, Math.round(Number(m.months) || 12)));
+          const code = newLicCode();
+          db.lic.codes[code] = { org, maxUsers: Math.max(0, Math.min(1000, Math.round(Number(m.maxUsers) || 0))),
+            maxChannels: Math.max(1, Math.min(50, Math.round(Number(m.maxChannels) || 1))),
+            until: Date.now() + months * 30 * DAY, created: Date.now(), note: String(m.note || '').slice(0, 120) };
+          msg = `Sukurtas kodas ${code}`;
+        } else {
+          if (m.t !== 'adminFree') {
+            const L = db.lic.codes[String(m.code || '')];
+            if (!L) return err(ws, 'badlic', 'Kodas nerastas');
+            if (m.t === 'adminLicExtend') {
+              L.until = Math.max(L.until, Date.now()) + Math.max(-60, Math.min(60, Math.round(Number(m.months) || 0))) * 30 * DAY;
+              msg = `${L.org}: galioja iki ${new Date(L.until).toISOString().slice(0, 10)}`;
+            } else if (m.t === 'adminLicEdit') {
+              if (m.maxUsers !== undefined) L.maxUsers = Math.max(0, Math.min(1000, Math.round(Number(m.maxUsers) || 0)));
+              if (m.maxChannels !== undefined) L.maxChannels = Math.max(1, Math.min(50, Math.round(Number(m.maxChannels) || 1)));
+            } else {
+              delete db.lic.codes[m.code];
+              for (const c of Object.values(db.channels)) if (c.license === m.code) delete c.license;
+              msg = `Kodas ${m.code} ištrintas`;
+            }
+          } else {
+            const name = normChannel(m.channel), c = name && db.channels[name];
+            if (!c) return err(ws, 'notfound', 'Kanalas nerastas');
+            c.free = !!m.on; msg = `#${name}: ${c.free ? 'nemokamas visam laikui' : 'pagal licenciją'}`;
+          }
+        }
+        saveDb(); pushLicAll();
+        return send(ws, { t: 'adminLic', msg, ...adminLicView(), channels: adminList() });
       }
       case 'adminPassword': case 'adminResetOwners': case 'adminDelete': {
         if (!ws.isAdmin) return err(ws, 'notadmin', 'Reikia administratoriaus teisių');
