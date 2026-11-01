@@ -203,8 +203,9 @@ function endTalk(ws, forced = false) {
   c.talker = null; c.current = null;
   const ch = db.channels[ws.chan];
   let item = null;
-  if (ch && data.length >= MIN_BYTES) {
-    item = { id: cur.id, from: cur.from, ts: cur.ts, dur: +(data.length / RATE).toFixed(1) };
+  const audioBytes = cur.bytes || data.length;
+  if (ch && audioBytes >= MIN_BYTES) {
+    item = { id: cur.id, from: cur.from, ts: cur.ts, dur: +(audioBytes / RATE).toFixed(1) };
     if (cur.cmd) item.voiceCmd = cur.cmd;
     fs.writeFile(audioFile(item.id), encAudio(data), () => {});
     ch.history.push(item);
@@ -240,7 +241,7 @@ const locId = (w) => sha('loc:' + w.tokenHash).slice(0, 10);
 function locList(c) {
   const now = Date.now();
   return [...c.locs.entries()].filter(([, l]) => (!l.until || l.until > now) && now - l.ts < LOC_MAX_AGE)
-    .map(([id, l]) => ({ id, name: l.name, lat: l.lat, lon: l.lon, acc: l.acc, ts: l.ts, until: l.until }));
+    .map(([id, l]) => l.enc ? { id, name: l.name, enc: l.enc, ts: l.ts, until: l.until } : ({ id, name: l.name, lat: l.lat, lon: l.lon, acc: l.acc, ts: l.ts, until: l.until }));
 }
 function broadcastLocs(name) {
   const c = live.get(name); if (!c) return;
@@ -323,7 +324,7 @@ function attach(ws, name) {
   rt(name).clients.add(ws);
   const lic = licStatus(name), shut = !lic.ok && !ws.isAdmin, chn = db.channels[name];
   rt(name).licOk = lic.ok;
-  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!chn.public, ticket: ws.ticket,
+  send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!chn.public, e2ee: !!chn.e2ee, ticket: ws.ticket,
     history: shut ? [] : chn.history, timer: shut ? null : timerView(chn), timerCode: !!chn.timerCode, meet: shut ? null : (chn.meet || null),
     now: Date.now(), locId: locId(ws), locs: shut ? [] : locList(rt(name)), lic });
   presence(name);
@@ -360,7 +361,7 @@ function findClient(name, id) {
 function adminList() {
   return Object.entries(db.channels).map(([name, ch]) => ({
     name, created: ch.created, online: live.has(name) ? live.get(name).clients.size : 0,
-    msgs: ch.history.length, owners: ch.owners.length, free: !!ch.free, license: ch.license || null, lic: licStatus(name)
+    msgs: ch.history.length, owners: ch.owners.length, free: !!ch.free, e2ee: !!ch.e2ee, license: ch.license || null, lic: licStatus(name)
   })).sort((a, b) => b.online - a.online || a.name.localeCompare(b.name));
 }
 
@@ -377,8 +378,11 @@ wss.on('connection', (ws, req) => {
       const c = ws.chan && live.get(ws.chan);
       if (!c || c.talker !== ws) return;
       if (data.length > 16384) return;                       // per didelis kadras
-      c.current.bytes = (c.current.bytes || 0) + data.length;
+      const e2 = db.channels[ws.chan] && db.channels[ws.chan].e2ee;
+      if (e2 && data.length < 29) return;                     // šifruotas kadras: IV(12) + duomenys + žymė(16)
+      c.current.bytes = (c.current.bytes || 0) + (e2 ? data.length - 28 : data.length);
       if (c.current.bytes > RATE * (MAX_TALK_MS / 1000 + 5)) return endTalk(ws, true); // daugiau nei 65 s garso
+      if (e2) { const len = Buffer.alloc(2); len.writeUInt16BE(data.length); c.current.chunks.push(len); } // kadrų ribos atšifravimui
       c.current.chunks.push(Buffer.from(data));
       for (const w of c.clients) if (w !== ws && w.readyState === 1) w.send(data, { binary: true });
       return;
@@ -395,6 +399,7 @@ wss.on('connection', (ws, req) => {
         if (db.channels[name]) return err(ws, 'exists', 'Toks kanalas jau yra. Pasirink kitą pavadinimą arba prisijunk.');
         setUser(ws, m);
         db.channels[name] = { owners: [ws.tokenHash], created: Date.now(), history: [], public: !!m.public };
+        if (m.e2ee) db.channels[name].e2ee = true;   // slaptažodžio vietoj – iš jo išvestas prisijungimo raktas; turinio raktas lieka telefonuose
         if (db.lic.enabled && !ws.isAdmin) {
           // bandomasis laikotarpis – vieną kartą vienam telefonui
           const dev = sha('dev:' + String(m.dev || m.token || ws.ip)).slice(0, 24);
@@ -411,6 +416,8 @@ wss.on('connection', (ws, req) => {
         const name = normChannel(m.channel);
         const c = name && db.channels[name];
         if (!c) return failAuth(ws, 'notfound', 'Kanalas nerastas');
+        if (m.e2 && !c.e2ee) return send(ws, { t: 'error', code: 'needplain', channel: name });
+        if (!m.e2 && c.e2ee) return err(ws, 'neede2', 'Kanalas šifruotas – atnaujink programėlę');
         if (!checkPw(m.password || '', c)) return failAuth(ws, 'badpass', 'Neteisingas slaptažodis');
         ws.fails = 0;
         const ls = licStatus(name), lc = live.get(name);
@@ -430,6 +437,13 @@ wss.on('connection', (ws, req) => {
       case 'loc': {
         if (!ch) return;
         if (!licOk(ws)) return;
+        if (ch.e2ee) {
+          const enc = String(m.enc || ''); if (!enc.startsWith('e2:') || enc.length > 400) return;
+          const c = rt(ws.chan), now = Date.now();
+          const until = Number(m.until) > now ? Math.min(Number(m.until), now + 24 * 3600000) : null;
+          c.locs.set(locId(ws), { name: ws.user, enc, ts: now, until });
+          return broadcastLocs(ws.chan);
+        }
         const lat = Number(m.lat), lon = Number(m.lon);
         if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return;
         const c = rt(ws.chan), now = Date.now();
@@ -459,6 +473,11 @@ wss.on('connection', (ws, req) => {
           if (!ch.meet) return;
           item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: ch.meet.title, meet: 'clear' };
           ch.meet = null;
+        } else if (ch.e2ee) {
+          const enc = String(m.enc || ''), title = String(m.title || '').slice(0, 400);
+          if (!enc.startsWith('e2:') || enc.length > 800 || !title.startsWith('e2:')) return err(ws, 'badplace', 'Netinkama vieta');
+          ch.meet = { enc, title, by: ws.user, ts: now };
+          item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: title, meet: 'set' };
         } else {
           const lat = Number(m.lat), lon = Number(m.lon);
           if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return err(ws, 'badplace', 'Netinkama vieta');
@@ -491,7 +510,7 @@ wss.on('connection', (ws, req) => {
           else end = now + Number(m.minutes) * 60000;
           if (!Number.isFinite(end) || end < now + 30000 || end > now + 7 * 24 * 3600000)
             return err(ws, 'badtime', 'Netinkamas laikas: nuo 1 min. iki 7 parų');
-          const title = String(m.title || (ch.timer && ch.timer.title) || 'Susitikimas').trim().slice(0, 40) || 'Susitikimas';
+          const title = String(m.title || (ch.timer && ch.timer.title) || 'Susitikimas').trim().slice(0, ch.e2ee ? 400 : 40) || 'Susitikimas';
           ch.timer = { title, start, end: Math.round(end), by: ws.user };
           item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: title, timer: kind, end: ch.timer.end };
         }
@@ -525,7 +544,7 @@ wss.on('connection', (ws, req) => {
         if (c.talker && c.talker !== ws) return send(ws, { t: 'busy', by: c.talker.user });
         if (c.talker === ws) return send(ws, { t: 'granted', id: c.current.id });
         c.talker = ws;
-        const cmd = m.cmd ? String(m.cmd).slice(0, 40) : undefined;
+        const cmd = m.cmd ? String(m.cmd).slice(0, ch && ch.e2ee ? 400 : 40) : undefined;
         c.current = { id: ++db.seq, from: ws.user, ts: Date.now(), chunks: [], cmd };
         saveDb();
         c.timer = setTimeout(() => endTalk(ws, true), MAX_TALK_MS);
@@ -539,7 +558,7 @@ wss.on('connection', (ws, req) => {
         if (!ch) return;
         if (!licOk(ws)) return licDenied(ws);
         const now = Date.now();
-        const text = String(m.text || '').trim().slice(0, 40) || 'Komanda';
+        const text = String(m.text || '').trim().slice(0, ch.e2ee ? 400 : 40) || 'Komanda';
         if (now - (ws.lastCmd || 0) < 800 && ws.lastCmdText === text) return; // tos pačios komandos dvigubas paspaudimas
         ws.lastCmd = now; ws.lastCmdText = text;
         const alarm = !!m.alarm;
@@ -717,6 +736,7 @@ app.get('/audio/:id', (req, res) => {
   fs.readFile(audioFile(id), (e, data) => {
     if (e) return fail('file');
     try { data = decAudio(data); } catch { return fail('decrypt'); }
+    if (ch.e2ee) { res.set('Content-Type', 'application/octet-stream'); res.set('Cache-Control', 'private, max-age=3600'); return res.send(data); } // atšifruoja telefonas
     res.set('Content-Type', 'audio/wav');
     res.set('Cache-Control', 'private, max-age=3600');
     res.send(muToWav(data));

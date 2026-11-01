@@ -400,7 +400,7 @@ async function initAudio(){
       if (!recBuf && !live) return;
       const out = encode(e.inputBuffer.getChannelData(0));
       if (!out.length) return;
-      if (recBuf) recBuf.push(out); else ws.send(out);
+      if (recBuf) recBuf.push(out); else sendAudio(out);
     };
   }
 }
@@ -471,13 +471,78 @@ function beep(freq, at=0, dur=0.07){
   o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t+dur+0.02);
 }
 
+// ---------- šifravimas „nuo galo iki galo“ (raktas tik telefonuose) ----------
+const E2 = (() => {
+  const te = new TextEncoder(), td = new TextDecoder();
+  const b64 = u8 => { let s=''; for (let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null, u8.subarray(i,i+0x8000)); return btoa(s); };
+  const unb64 = s => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+  const hex = u8 => [...u8].map(b=>b.toString(16).padStart(2,'0')).join('');
+  const cache = new Map();
+  // iš slaptažodžio: pirmoji pusė – prisijungimo raktas serveriui, antroji – turinio raktas (serveris jo negauna)
+  async function derive(ch, pw){
+    const id = ch+'\n'+pw; if (cache.has(id)) return cache.get(id);
+    const base = await crypto.subtle.importKey('raw', te.encode(pw), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits({name:'PBKDF2', hash:'SHA-256', salt:te.encode('311vc-e2ee:'+ch), iterations:150000}, base, 512));
+    const key = await crypto.subtle.importKey('raw', bits.slice(32), {name:'AES-GCM'}, false, ['encrypt','decrypt']);
+    const r = {auth: hex(bits.slice(0,32)), key}; cache.set(id, r); return r;
+  }
+  const authSync = (ch, pw) => { const r=cache.get(ch+'\n'+pw); return r ? r.auth : null; };
+  async function encBin(key, u8){ const iv=crypto.getRandomValues(new Uint8Array(12)); const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, u8)); const o=new Uint8Array(12+ct.length); o.set(iv); o.set(ct,12); return o; }
+  async function decBin(key, u8){ return new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM', iv:u8.subarray(0,12)}, key, u8.subarray(12))); }
+  const enc = async (key, str) => 'e2:'+b64(await encBin(key, te.encode(str)));
+  async function dec(key, s){
+    if (typeof s!=='string' || !s.startsWith('e2:')) return s;
+    if (!key) return '🔐';
+    try{ return td.decode(await decBin(key, unb64(s.slice(3)))); }catch{ return '🔐 ?'; }
+  }
+  return {derive, authSync, encBin, decBin, enc, dec};
+})();
+const isE2 = () => !!(cur && cur.e2);
+const normCh = s => String(s||'').trim().toLowerCase().replace(/\s+/g,'-').slice(0,32);
+const ex = async s => isE2() && cur.key && s!=null ? E2.enc(cur.key, String(s)) : s;
+const dx = async s => isE2() ? E2.dec(cur.key, s) : s;
+async function decItems(list){ for (const h of list||[]){ if (h.cmd) h.cmd=await dx(h.cmd); if (h.voiceCmd) h.voiceCmd=await dx(h.voiceCmd); } return list; }
+async function decMeet(mt){
+  if (!mt || !mt.enc) return mt || null;
+  try{ const j=JSON.parse(await dx(mt.enc)); return {lat:+j.lat, lon:+j.lon, title:String(j.title||'🚩'), by:mt.by, ts:mt.ts}; }catch{ return null; }
+}
+async function decLocs(list){
+  const out=[];
+  for (const l of list||[]){
+    if (!l.enc){ out.push(l); continue; }
+    try{ const j=JSON.parse(await dx(l.enc)); if (isFinite(j.lat) && isFinite(j.lon)) out.push({...l, lat:+j.lat, lon:+j.lon, acc:+j.acc||0}); }catch{}
+  }
+  return out;
+}
+let audioChain = Promise.resolve();
+function sendAudio(u8){
+  if (!isE2()){ if (ws && ws.readyState===1) ws.send(u8); return; }
+  const k=cur.key; if (!k) return;
+  audioChain = audioChain.then(async()=>{ const e=await E2.encBin(k, u8); if (ws && ws.readyState===1) ws.send(e); }).catch(()=>{});
+}
+const afterAudio = fn => { audioChain = audioChain.then(fn).catch(()=>{}); };
+async function meetMsg(lat, lon, title, code){
+  if (isE2()) return {t:'meetSet', enc:await ex(JSON.stringify({lat, lon, title})), title:await ex(title), code};
+  return {t:'meetSet', lat, lon, title, code};
+}
+let lastJoin=null;
+// prisijungimas: šifruotam kanalui serveriui siunčiamas tik išvestas raktas, ne slaptažodis
+async function sendJoin(c){
+  if (!c.viaAdmin && c.pw && c.e2!==false){ try{ await E2.derive(c.name, c.pw); }catch{} }
+  lastJoin = {name:c.name, pw:c.pw, viaAdmin:c.viaAdmin, e2:c.e2};
+  wsSend(joinMsg(c));
+}
+
 // ---------- ryšys ----------
 let ws=null, cur=null /* {name,pw,owner,ticket} */, pending=null, rxFrom=null, talkerName=null, reconnectTimer=null;
 let wantOpen=false, sendQueue=[], me={id:0,owner:false,admin:false}, lastUsers=[];
 let adminKey = store.get('racija_admin','');
-const joinMsg = c => c.viaAdmin
-  ? {t:'adminJoin', name:myName, channel:c.name, token}
-  : {t:'join', name:myName, channel:c.name, password:c.pw, token};
+const joinMsg = c => {
+  if (c.viaAdmin) return {t:'adminJoin', name:myName, channel:c.name, token};
+  const auth = c.e2!==false && c.pw!=null ? E2.authSync(c.name, c.pw) : null;
+  return auth ? {t:'join', name:myName, channel:c.name, password:auth, e2:true, token}
+              : {t:'join', name:myName, channel:c.name, password:c.pw, token};
+};
 function ensureWs(){
   if (ws && (ws.readyState===0 || ws.readyState===1)) return;
   clearTimeout(reconnectTimer);
@@ -503,8 +568,14 @@ function wsSend(obj){
   if (ws && ws.readyState===1) ws.send(s); else { sendQueue.push(s); ensureWs(); }
 }
 
-function onMsg(ev){
-  if (ev.data instanceof ArrayBuffer){ playChunk(new Uint8Array(ev.data)); return; }
+let msgChain = Promise.resolve();
+function onMsg(ev){ msgChain = msgChain.then(()=>handleMsg(ev)).catch(e=>console.error(e)); }
+async function handleMsg(ev){
+  if (ev.data instanceof ArrayBuffer){
+    let b = new Uint8Array(ev.data);
+    if (isE2()){ if (!cur.key) return; try{ b = await E2.decBin(cur.key, b); }catch{ return; } }
+    playChunk(b); return;
+  }
   const m = JSON.parse(ev.data);
   switch(m.t){
     case 'joined': {
@@ -513,9 +584,12 @@ function onMsg(ev){
       const src = pending || cur || {};
       const pw = src.pw ?? prev.pw ?? null;
       const viaAdmin = !!src.viaAdmin;
-      cur = { name:m.channel, pw, viaAdmin, owner:m.owner, ticket:m.ticket, public:!!m.public };
+      cur = { name:m.channel, pw, viaAdmin, owner:m.owner, ticket:m.ticket, public:!!m.public, e2:!!m.e2ee, key:null };
+      if (cur.e2 && pw!=null){ try{ cur.key = (await E2.derive(cur.name, pw)).key; }catch{} }
       me.owner = m.owner; me.admin = m.admin;
-      upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, last:Date.now() });
+      upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, e2:!!m.e2ee, last:Date.now() });
+      await decItems(m.history); m.meet = await decMeet(m.meet); m.locs = await decLocs(m.locs);
+      if (m.timer) m.timer.title = await dx(m.timer.title);
       if (pending){ closeModal(); }
       enterChannelUI(m.history);
       cur.timerCode = !!m.timerCode; setTimerState(m.timer, m.now);
@@ -524,6 +598,10 @@ function onMsg(ev){
       break;
     }
     case 'error':
+      if (m.code==='needplain' && lastJoin){   // senas (nešifruotas) kanalas – jungiamės įprastai
+        upsertSaved({name:lastJoin.name, e2:false}); if (cur && cur.name===lastJoin.name) cur.e2=false;
+        wsSend(joinMsg({...lastJoin, e2:false})); break;
+      }
       if (m.code==='badadmin' || m.code==='noadmin'){
         adminKey=''; store.del('racija_admin');
         if (!pending) { toast(m.msg); break; }
@@ -535,7 +613,9 @@ function onMsg(ev){
           ${c.pw?'<button class="btn" id="mRe">Sukurti iš naujo</button>':''}
           <button class="btn danger" id="mRm">Pašalinti iš sąrašo</button>
           <button class="btn alt" onclick="closeModal()">Uždaryti</button><div class="err" id="mErr"></div>`);
-        if ($('mRe')) $('mRe').onclick=()=>{ $('mRe').disabled=true; pending={pw:c.pw}; wsSend({t:'create', name:myName, channel:c.name, password:c.pw, token}); };
+        if ($('mRe')) $('mRe').onclick=async()=>{ $('mRe').disabled=true; pending={pw:c.pw};
+          if (c.e2!==false){ const k=await E2.derive(c.name, c.pw); wsSend({t:'create', name:myName, channel:c.name, password:k.auth, e2ee:true, token}); }
+          else wsSend({t:'create', name:myName, channel:c.name, password:c.pw, token}); };
         $('mRm').onclick=()=>{ saved=saved.filter(x=>x.name!==c.name); saveList(); closeModal(); renderList(); };
         break;
       }
@@ -575,10 +655,12 @@ function onMsg(ev){
       vib([60,40,60]); flash(`Užimta: kalba ${m.by}`); $('ptt').classList.remove('down');
       if (cmdAudio){ cmdAudio=null; } break;
     case 'start':
+      if (m.cmd) m.cmd = await dx(m.cmd);
       rxFrom=m.from; beep(660); vib(20);
       if (m.cmd && !recentCmd(m.from, m.cmd)) showCmd(m.from, m.cmd, true);
       updateStatus(); break;
     case 'cmd':
+      m.text = await dx(m.text); if (m.item) m.item.cmd = m.text;
       if (m.item) addHist(m.item);
       cmdSeen = {from:m.from, text:m.text, at:Date.now()};
       if (Date.now()-lastSentCmd < 3000 && m.from===myName){ toast(`${m.alarm?'🚨':'📢'} Išsiųsta: ${m.text}`); break; }
@@ -586,6 +668,7 @@ function onMsg(ev){
       if (m.alarm) showAlarm(m.from, m.text, m.cid); else showCmd(m.from, m.text, m.voice);
       break;
     case 'stop':
+      if (m.item && m.item.voiceCmd) m.item.voiceCmd = await dx(m.item.voiceCmd);
       if (rxFrom===m.from){ beep(440, playHead); rxFrom=null; }
       if (m.forced && talking){ stopTalk(true); if (m.forced!=='alarm') flash('Pasiektas 60 s limitas'); }
       if (m.item) addHist(m.item);
@@ -605,6 +688,7 @@ function onMsg(ev){
       break;
     }
     case 'timer':
+      if (m.timer) m.timer.title = await dx(m.timer.title); if (m.item && m.item.cmd) m.item.cmd = await dx(m.item.cmd);
       setTimerState(m.timer, m.now);
       if (m.item) addHist(m.item);
       if (pending && pending.timer){ closeModal(); }
@@ -614,15 +698,16 @@ function onMsg(ev){
       }
       break;
     case 'timerCode': if (cur){ cur.timerCode=m.on; if ($('tmMark')) timerModal(); } break;
-    case 'locs': setLocs(m.list, m.now); break;
+    case 'locs': setLocs(await decLocs(m.list), m.now); break;
     case 'meet':
+      m.meet = await decMeet(m.meet); if (m.item && m.item.cmd) m.item.cmd = await dx(m.item.cmd);
       setMeet(m.meet); if (m.item) addHist(m.item);
       if (pending && pending.meet) closeModal();
       if (m.item && m.item.from!==myName) showBanner(m.meet ? '🚩 '+m.meet.title : '🚩 Susitikimo vieta pašalinta', m.item.from + (m.meet ? ' pažymėjo žemėlapyje' : ''));
       break;
     case 'publicSet': if (cur){ cur.public=m.on; toast(m.on?'Grupė rodoma bendrame sąraše':'Grupė paslėpta iš bendro sąrašo'); } break;
     case 'passwordChanged': {
-      if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
+      if (pending && cur){ cur.pw=pending.pw; upsertSaved({name:cur.name, pw:cur.pw}); if (cur.e2) try{ cur.key=(await E2.derive(cur.name, cur.pw)).key; }catch{} closeModal(); toast('Slaptažodis pakeistas. Pakviesk narius iš naujo.'); }
       break;
     }
   }
@@ -668,7 +753,7 @@ $('chList').addEventListener('click', async e=>{
   if (!(await audioOk())) return;
   openModal(`<h2>Jungiamasi prie #${esc(c.name)}…</h2><div class="err" id="mErr"></div><button class="btn alt" onclick="closeModal()">Atšaukti</button>`);
   pending={pw:c.pw, viaAdmin:c.viaAdmin, fromSaved:c}; wantOpen=true;
-  wsSend(joinMsg(c));
+  sendJoin(c);
 });
 
 // ---------- licencija ----------
@@ -819,7 +904,8 @@ function renderAdmin(list){
           <button class="btn" id="mOk">Išsaugoti</button><button class="btn alt" id="mBack">Atgal</button><div class="err" id="mErr"></div>`);
         $('mBack').onclick=()=>renderAdmin(adminChannels);
         $('mOk').onclick=()=>{ const p=$('mPw').value; if(p.length<6){$('mErr').textContent='Per trumpas';return;}
-          pending={pwFor:n, pw:p}; wsSend({t:'adminPassword', channel:n, password:p}); };
+          pending={pwFor:n, pw:p}; const ac=adminChannels.find(x=>x.name===n);
+          if (ac && ac.e2ee) E2.derive(n, p).then(k=>wsSend({t:'adminPassword', channel:n, password:k.auth})); else wsSend({t:'adminPassword', channel:n, password:p}); };
       } else {
         const del = a==='del';
         openModal(`<h2>${del?`Ištrinti #${esc(n)}?`:`Nuimti kūrėjus #${esc(n)}?`}</h2>
@@ -841,6 +927,7 @@ $('newChBtn').onclick = () => {
   openModal(`<h2>Nauja grupė</h2>
     <div class="field"><label>Kanalo pavadinimas</label><input id="mName" maxlength="32" placeholder="pvz. planavimas-1"></div>
     <div class="field"><label>Slaptažodis (bent 6 simboliai)</label><input id="mPw" maxlength="64" placeholder="kurį žinos nariai"></div>
+    <label class="check"><input type="checkbox" id="mE2" checked> <span>🔐 Šifruotas kanalas<small>Balsą, komandas ir vietas iššifruoja tik nariai su slaptažodžiu. Net serveris jų negali perskaityti.</small></span></label>
     <label class="check"><input type="checkbox" id="mPub" checked> <span>Rodyti bendrame grupių sąraše<small>Kiti matys pavadinimą lange „Prisijungti“, bet įeiti galės tik žinodami slaptažodį</small></span></label>
     <button class="btn" id="mOk">Sukurti</button><button class="btn alt" onclick="closeModal()">Atšaukti</button>
     <div class="err" id="mErr"></div>`);
@@ -851,7 +938,9 @@ $('newChBtn').onclick = () => {
     if (!(await audioOk())) return;
     $('mOk').disabled=true; $('mErr').textContent='';
     pending={pw:p}; wantOpen=true;
-    wsSend({t:'create', name:myName, channel:n, password:p, token, public:$('mPub').checked});
+    const e2=$('mE2').checked, name=normCh(n);
+    if (e2){ const k=await E2.derive(name, p); wsSend({t:'create', name:myName, channel:name, password:k.auth, e2ee:true, token, public:$('mPub').checked}); }
+    else wsSend({t:'create', name:myName, channel:n, password:p, token, public:$('mPub').checked});
   };
 };
 
@@ -889,7 +978,7 @@ function joinModal(prefName='', prefPw=''){
     if (!(await audioOk())) return;
     $('mOk').disabled=true; $('mErr').textContent='';
     pending={pw:p}; wantOpen=true;
-    wsSend({t:'join', name:myName, channel:n, password:p, token});
+    sendJoin({name:normCh(n), pw:p, e2:(findSaved(normCh(n))||{}).e2});
   };
 }
 $('joinChBtn').onclick = () => joinModal();
@@ -903,7 +992,7 @@ function inviteModal(d){
     if (!(await audioOk())) return;
     $('mOk').disabled=true;
     pending={pw:d.k}; wantOpen=true;
-    wsSend({t:'join', name:myName, channel:d.c, password:d.k, token});
+    sendJoin({name:normCh(d.c), pw:d.k, e2:(findSaved(normCh(d.c))||{}).e2});
   };
 }
 
@@ -946,7 +1035,7 @@ function enterChannelUI(history){
 $('backBtn').onclick = () => { setTimerState(null); setLic(null); pauseSharing(); closeMap(); setLocs([]); setMeet(null); if (talking) stopTalk(true); wsSend({t:'leave'}); cur=null; wantOpen=false; if(ws) ws.close(); showList(); };
 
 function renderChSub(){
-  $('chSub').textContent = (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
+  $('chSub').textContent = (cur.e2?'🔐 ':'') + (cur.viaAdmin?'🛡️ admin · ':cur.owner?'👑 kūrėjas · ':'') + myName;
 }
 $('inviteBtn').onclick = () => {
   if (!cur.pw){
@@ -1023,7 +1112,8 @@ $('menuBtn').onclick = () => {
       <div class="err" id="mErr"></div>`);
     $('mOk').onclick = () => {
       const p=$('mPw').value; if (p.length<6){ $('mErr').textContent='Per trumpas'; return; }
-      $('mOk').disabled=true; pending={pw:p}; wsSend({t:'password', password:p});
+      $('mOk').disabled=true; pending={pw:p};
+      if (cur.e2) E2.derive(cur.name, p).then(k=>wsSend({t:'password', password:k.auth})); else wsSend({t:'password', password:p});
     };
   };
 };
@@ -1039,6 +1129,7 @@ function pttDown(e){
   e.preventDefault();
   if (ptt.classList.contains('down')) return;
   if (talkerName && talkerName!==myName){ vib([60,40,60]); flash(`Užimta: kalba ${talkerName}`); return; }
+  if (isE2() && !cur.key){ flash('Šifruotas kanalas – reikia slaptažodžio'); return; }
   if (curLic && !curLic.ok && !me.admin){ vib([60,40,60]); flash('Licencija baigėsi'); if (cur && cur.owner) licModal(); return; }
   if (!ws || ws.readyState!==1){ flash('Nėra ryšio'); return; }
   ptt.classList.add('down');
@@ -1054,7 +1145,7 @@ function pttUp(e){
 }
 function stopTalk(silent){
   ptt.classList.remove('down');
-  setTimeout(()=>{ talking=false; wsSend({t:'stop'}); if(!silent) beep(520); updateStatus(); closeMicSoon(); },120);
+  setTimeout(()=>{ talking=false; afterAudio(()=>wsSend({t:'stop'})); if(!silent) beep(520); updateStatus(); closeMicSoon(); },120);
 }
 ptt.addEventListener('pointerdown', pttDown);
 ptt.addEventListener('pointerup', pttUp);
@@ -1152,7 +1243,20 @@ async function playHist(id, li, retried){
     done(); toast(AUDIO_ERR[why] || 'Įrašas nebeprieinamas'); return;
   }
   if (!r.ok){ done(); toast('Serverio klaida ('+r.status+')'); return; }
-  const url = URL.createObjectURL(await r.blob());
+  let blob = await r.blob();
+  if (isE2()){                                   // šifruotas įrašas: [ilgis 2 B][IV+duomenys] … → atšifruojam telefone
+    if (!cur.key){ done(); toast('🔐 Šifruotas – reikia slaptažodžio'); return; }
+    try{
+      const raw = new Uint8Array(await blob.arrayBuffer()), parts=[]; let n=0;
+      for (let i=0; i+2<=raw.length;){ const len=(raw[i]<<8)|raw[i+1]; i+=2; const fr=await E2.decBin(cur.key, raw.subarray(i,i+len)); parts.push(fr); n+=fr.length; i+=len; }
+      const wav = new DataView(new ArrayBuffer(44+n*2)), w=(o,str)=>{ for(let k=0;k<str.length;k++) wav.setUint8(o+k,str.charCodeAt(k)); };
+      w(0,'RIFF'); wav.setUint32(4,36+n*2,true); w(8,'WAVE'); w(12,'fmt '); wav.setUint32(16,16,true); wav.setUint16(20,1,true); wav.setUint16(22,1,true);
+      wav.setUint32(24,RATE,true); wav.setUint32(28,RATE*2,true); wav.setUint16(32,2,true); wav.setUint16(34,16,true); w(36,'data'); wav.setUint32(40,n*2,true);
+      let o=44; for (const fr of parts) for (const b of fr){ wav.setInt16(o, MU[b], true); o+=2; }
+      blob = new Blob([wav.buffer], {type:'audio/wav'});
+    }catch{ done(); toast('🔐 Nepavyko atšifruoti įrašo'); return; }
+  }
+  const url = URL.createObjectURL(blob);
   currentAudio = new Audio(url);
   currentAudio.onended = currentAudio.onpause = () => { done(); URL.revokeObjectURL(url); };
   currentAudio.play().catch(e=>{ done(); toast('Nepavyko paleisti garso: '+(e && e.name || '')); });
@@ -1189,7 +1293,9 @@ function sendLoc(force){
   const moved = lastLocSent ? distM(lastLocSent, myPos) : 1e9;
   if (!force && lastLocSent && moved < 15 && Date.now()-lastLocSent.at < 60000) return;  // nejudant – kas minutę
   if (!force && lastLocSent && Date.now()-lastLocSent.at < 10000) return;                 // ne dažniau nei kas 10 s
-  wsSend({t:'loc', lat:myPos.lat, lon:myPos.lon, acc:myPos.acc, until: st.until ? st.until + srvOff : 0});
+  const until = st.until ? st.until + srvOff : 0, pos = {...myPos};
+  if (isE2()) ex(JSON.stringify({lat:pos.lat, lon:pos.lon, acc:pos.acc})).then(enc=>wsSend({t:'loc', enc, until}));
+  else wsSend({t:'loc', lat:pos.lat, lon:pos.lon, acc:pos.acc, until});
   lastLocSent = {...myPos, at:Date.now()};
 }
 function startGeo(){
@@ -1442,7 +1548,7 @@ function meetModal(){
     <div class="err" id="mErr"></div>`);
   const code=()=>{ const c=$('mtCode'); if (!c) return undefined; upsertSaved({name:cur.name, timerCode:c.value}); return c.value; };
   const title=()=>$('mtName').value.trim()||'Susitikimo vieta';
-  const send=(lat,lon,t,c)=>{ pending={meet:true}; wsSend({t:'meetSet', lat, lon, title:t, code:c}); };
+  const send=async(lat,lon,t,c)=>{ pending={meet:true}; wsSend(await meetMsg(lat, lon, t, c)); };
   let parsed=null;
   $('mtCoord').oninput=()=>{
     parsed=GEO.parse($('mtCoord').value); const info=$('mtCoordInfo');
@@ -1469,7 +1575,7 @@ $('placeCancel').onclick = () => { placing=false; $('placeHint').classList.add('
 function onMapClick(e){
   if (!placing) return;
   const p=placing; placing=false; $('placeHint').classList.add('hidden');
-  wsSend({t:'meetSet', lat:e.latlng.lat, lon:e.latlng.lng, title:p.title, code:p.code});
+  meetMsg(e.latlng.lat, e.latlng.lng, p.title, p.code).then(wsSend);
 }
 
 function personColor(l){ return l.id===myLocId ? '#3fa9f5' : (sNow()-l.ts > 120000 ? '#7d8a99' : '#ff8a1f'); }
@@ -1576,7 +1682,7 @@ function timerModal(){
     <button class="btn alt" onclick="closeModal()" style="margin-top:10px">Uždaryti</button>
     <div class="err" id="mErr"></div>`);
   const code = () => { const c=$('tCode'); if (!c) return undefined; upsertSaved({name:cur.name, timerCode:c.value}); return c.value; };
-  const send = msg => { pending={timer:true}; $('mErr').textContent=''; wsSend({...msg, code:code()}); };
+  const send = async msg => { pending={timer:true}; $('mErr').textContent=''; if (msg.title) msg.title = await ex(msg.title); wsSend({...msg, code:code()}); };
   $('modalBox').querySelectorAll('[data-min]').forEach(b=>b.onclick=()=>{
     $('modalBox').querySelectorAll('[data-min]').forEach(x=>x.classList.remove('on')); b.classList.add('on');
     const m=+b.dataset.min; $('tH').value=Math.floor(m/60)||''; $('tM').value=m%60||''; $('tAt').value=''; });
@@ -1665,19 +1771,20 @@ function sendCmd(c){
   const cid = newCid(); seenCid(cid);
   lastSentCmd = Date.now();
   let via=[];
-  if (online){ wsSend({t:'cmd', text:c.text, alarm:!!c.alarm, voice:!!c.audio, cid}); via.push('internetu'); }
+  if (online && isE2() && !cur.key){ flash('Šifruotas kanalas – reikia slaptažodžio'); return; }
+  if (online){ ex(c.text).then(t=>{ wsSend({t:'cmd', text:t, alarm:!!c.alarm, voice:!!c.audio, cid}); if (c.audio && cmdAudio===c) wsSend({t:'start', cmd:t}); }); via.push('internetu'); }
   if (lora){
     const msg = `${c.alarm?'🚨':'📢'} ${c.text} · ${myName} #${cid}`;
     try{ if (Native311.meshSend(msg, cid)) via.push('LoRa'); }catch{}
   }
   vib(c.alarm ? [100,50,100] : 40);
   if (!online) toast(`${c.alarm?'🚨':'📢'} Išsiųsta ${via.join(' + ')}: ${c.text}`);
-  if (online && c.audio && !talking){ cmdAudio=c; wsSend({t:'start', cmd:c.text}); }
+  if (online && c.audio && !talking) cmdAudio=c;   // „start“ išsiunčiamas kartu su komanda
 }
 function sendStoredAudio(c){
   const a=b64dec(c.audio);
-  for (let i=0;i<a.length;i+=3200) ws.send(a.subarray(i,i+3200));
-  wsSend({t:'stop'});
+  for (let i=0;i<a.length;i+=3200) sendAudio(a.subarray(i,i+3200));
+  afterAudio(()=>wsSend({t:'stop'}));
 }
 
 // STOP: laikyti 1 s, kad nebūtų netyčinio paspaudimo
