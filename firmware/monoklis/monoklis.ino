@@ -27,7 +27,7 @@
 #include <Preferences.h>
 #include <math.h>
 
-#define FW_VER "1.0"
+#define FW_VER "2.0"
 #define SVC_UUID "7a1e0001-3110-4c48-9f0b-6d6f6e6f6b6c"
 #define RX_UUID  "7a1e0002-3110-4c48-9f0b-6d6f6e6f6b6c"
 #define TX_UUID  "7a1e0003-3110-4c48-9f0b-6d6f6e6f6b6c"
@@ -277,43 +277,85 @@ int wrapDraw(const char *txt, int x, int y, int w, int lineH, int maxLines) {
   return lines;
 }
 
-void drawStatusRow() {
-  oled.setFont(u8g2_font_5x8_tf);
-  if (talker[0]) {
-    char b[40]; snprintf(b, sizeof b, "> %s", talker);
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(66, 9, b);
-    return;
-  }
-  int pc = battPct();
-  if (pc >= 0) {
-    bool low = pc < 15;
-    if (!low || (millis() / 500) % 2) {
-      oled.drawFrame(110, 1, 15, 7); oled.drawBox(125, 3, 2, 3);
-      oled.drawBox(112, 3, (11 * pc) / 100, 3);
-    }
-  }
-  if (!connected) { oled.setFont(u8g2_font_5x8_tf); oled.drawStr(66, 8, "BT --"); }
-  else if (!calibrated && (millis() / 700) % 2) { oled.setFont(u8g2_font_5x8_tf); oled.drawStr(66, 8, "KALIBR."); }
+// ======== KARINIS HUD (128×64) ========
+static void dotH(int x0, int x1, int y) { for (int x = x0; x <= x1; x += 2) oled.drawPixel(x, y); }
+static void dotV(int x, int y0, int y1) { for (int y = y0; y <= y1; y += 2) oled.drawPixel(x, y); }
+static bool blink(int ms) { return (millis() / ms) % 2; }
+static void brackets(int x0, int y0, int x1, int y1, int L) {   // taikymo rėmelio kampai
+  oled.drawHLine(x0, y0, L); oled.drawVLine(x0, y0, L); oled.drawHLine(x1 - L + 1, y0, L); oled.drawVLine(x1, y0, L);
+  oled.drawHLine(x0, y1, L); oled.drawVLine(x0, y1 - L + 1, L); oled.drawHLine(x1 - L + 1, y1, L); oled.drawVLine(x1, y1 - L + 1, L);
+}
+static void diamond(int x, int y, int r, bool fill) {
+  if (fill) { oled.drawTriangle(x - r, y, x, y - r, x + r, y); oled.drawTriangle(x - r, y, x, y + r, x + r, y); }
+  else { oled.drawLine(x - r, y, x, y - r); oled.drawLine(x, y - r, x + r, y); oled.drawLine(x + r, y, x, y + r); oled.drawLine(x, y + r, x - r, y); }
+}
+static void fmtRng(float m, char *num, const char **unit) {
+  if (m < 1000) { sprintf(num, "%d", (int)lroundf(m)); *unit = "M"; }
+  else if (m < 10000) { sprintf(num, "%d.%d", (int)(m / 1000), (int)(fmodf(m, 1000) / 100)); *unit = "KM"; }
+  else { sprintf(num, "%d", (int)lroundf(m / 1000)); *unit = "KM"; }
 }
 
-// radaras: tu centre, viršus – kur žiūri
-void drawFlag(int x, int y) { oled.drawVLine(x, y - 7, 8); oled.drawTriangle(x + 1, y - 7, x + 1, y - 3, x + 5, y - 5); }
+// kompaso juosta viršuje: ±45°, žymės kas 5°, užrašai kas 45°, tikslas – rombas
+void drawTape(bool tgt, float tgtBrg) {
+  static const char *LBL[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+  const float PX = 128.0f / 90.0f;
+  float h = headingOk ? heading : 0;
+  oled.setFont(u8g2_font_4x6_tf);
+  int first = ((int)floorf((h - 46) / 5)) * 5;
+  for (int d = first; d <= h + 46; d += 5) {
+    int x = 64 + (int)lroundf((d - h) * PX); if (x < 0 || x > 127) continue;
+    int dd = ((d % 360) + 360) % 360;
+    if (dd % 45 == 0) { oled.drawVLine(x, 8, 5); const char *t = LBL[dd / 45]; oled.drawStr(x - oled.getStrWidth(t) / 2 + 1, 6, t); }
+    else if (dd % 15 == 0) { oled.drawVLine(x, 10, 3); }
+    else oled.drawPixel(x, 12);
+  }
+  oled.drawHLine(0, 13, 128);
+  oled.drawTriangle(61, 18, 67, 18, 64, 14);                 // tavo kryptis
+  if (tgt && headingOk) {
+    float rel = wrap180(tgtBrg - h);
+    if (fabsf(rel) <= 44) diamond(64 + (int)lroundf(rel * PX), 10, 3, true);
+    else if (blink(300)) { oled.setFont(u8g2_font_5x7_tf); oled.drawStr(rel < 0 ? 0 : 118, 7, rel < 0 ? "<<" : ">>"); }
+  }
+}
+
+// apatinė eilutė: kas kalba / tikslas / ryšys, baterija
+void drawBottom(const char *label) {
+  dotH(0, 127, 53);
+  oled.setFont(u8g2_font_5x7_tf);
+  if (talker[0]) {
+    char b[28]; snprintf(b, sizeof b, "TX %s", talker);
+    oled.setDrawColor(1); oled.drawBox(0, 55, oled.getUTF8Width(b) + 4, 9); oled.setDrawColor(0);
+    oled.drawUTF8(2, 62, b); oled.setDrawColor(1);
+  } else if (label && label[0]) {
+    oled.setFont(u8g2_font_6x12_te); diamond(3, 59, 2, false); oled.drawUTF8(8, 63, label);
+  }
+  oled.setFont(u8g2_font_4x6_tf);
+  if (!connected) { if (blink(400)) oled.drawStr(94, 62, "NO LNK"); }
+  else if (!calibrated && blink(600)) oled.drawStr(98, 62, "CAL!");
+  else oled.drawStr(98, 62, "LNK");
+  int pc = battPct();
+  if (pc >= 0 && (pc >= 15 || blink(400))) {                 // 4 baterijos stulpeliai
+    for (int i = 0; i < 4; i++) { int hgt = 2 + i * 2; if (pc > i * 25) oled.drawBox(112 + i * 4, 63 - hgt, 3, hgt); else oled.drawFrame(112 + i * 4, 63 - hgt, 3, hgt); }
+  }
+}
 
 void drawRadar(bool navFresh) {
-  const int cx = 32, cy = 32, R = 30;
+  const int cx = 31, cy = 32, R = 30;
   float maxd = 0;
   for (int i = 0; i < memN; i++) maxd = max(maxd, mem[i].dist);
   if (navFresh) maxd = max(maxd, nav.dist);
   static const int scales[] = {50, 100, 250, 500, 1000, 2000, 5000};
   int sc = 5000;
   for (int v : scales) if (v >= maxd * 1.1f) { sc = v; break; }
-
-  oled.drawCircle(cx, cy, R); oled.drawCircle(cx, cy, R / 2);
-  oled.drawPixel(cx, cy - R + 1); oled.drawTriangle(cx - 2, cy + 2, cx + 2, cy + 2, cx, cy - 3);   // tu
-  if (headingOk) {                                     // Š žymė ant krašto
+  oled.drawCircle(cx, cy, R);
+  for (int a = 0; a < 360; a += 12) oled.drawPixel(cx + (int)lroundf(cosf(a * PI / 180) * R / 2), cy + (int)lroundf(sinf(a * PI / 180) * R / 2));
+  dotH(cx - R + 2, cx + R - 2, cy); dotV(cx, cy - R + 2, cy + R - 2);
+  float sw = (millis() % 2400) / 2400.0f * 2 * PI;          // besisukantis spindulys
+  oled.drawLine(cx, cy, cx + (int)lroundf(sinf(sw) * (R - 1)), cy - (int)lroundf(cosf(sw) * (R - 1)));
+  oled.drawTriangle(cx - 2, cy + 2, cx + 2, cy + 2, cx, cy - 3);
+  if (headingOk) {
     float a = -heading * PI / 180.0f;
-    int nx = cx + (int)lroundf(sinf(a) * (R - 5)), ny = cy - (int)lroundf(cosf(a) * (R - 5));
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(nx - 3, ny + 4, "Š");
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(cx + (int)lroundf(sinf(a) * (R - 5)) - 1, cy - (int)lroundf(cosf(a) * (R - 5)) + 3, "N");
   }
   auto pos = [&](float brg, float dist, int &x, int &y, bool &edge) {
     float r = dist / sc * R; edge = r > R - 2; if (edge) r = R - 2;
@@ -323,27 +365,28 @@ void drawRadar(bool navFresh) {
   int nearest = -1;
   for (int i = 0; i < memN; i++) {
     int x, y; bool e; pos(mem[i].brg, mem[i].dist, x, y, e);
-    if (e) oled.drawCircle(x, y, 2); else oled.drawDisc(x, y, 2);
+    if (e) oled.drawFrame(x - 1, y - 1, 3, 3); else oled.drawBox(x - 1, y - 1, 3, 3);
     if (nearest < 0 || mem[i].dist < mem[nearest].dist) nearest = i;
   }
-  if (navFresh) { int x, y; bool e; pos(nav.brg, nav.dist, x, y, e); drawFlag(x, y); }
-  if (nearest >= 0) { int x, y; bool e; pos(mem[nearest].brg, mem[nearest].dist, x, y, e); oled.drawCircle(x, y, 4); }
-
+  if (navFresh) { int x, y; bool e; pos(nav.brg, nav.dist, x, y, e); diamond(x, y, 3, blink(250)); }
+  if (nearest >= 0) { int x, y; bool e; pos(mem[nearest].brg, mem[nearest].dist, x, y, e); brackets(x - 4, y - 4, x + 4, y + 4, 3); }
   // dešinė pusė
-  char num[12], unit[4], b[32];
-  oled.setFont(u8g2_font_6x12_te);
-  fmtDist(sc, num, unit); snprintf(b, sizeof b, "R %s %s", num, unit); oled.drawUTF8(66, 22, b);
+  char num[12], b[32]; const char *u;
+  oled.setFont(u8g2_font_4x6_tf); oled.drawStr(68, 6, "PPI"); dotV(66, 0, 52);
+  fmtRng(sc, num, &u); snprintf(b, sizeof b, "R %s%s", num, u); oled.drawStr(127 - oled.getStrWidth(b), 6, b);
   if (nearest >= 0) {
-    fmtDist(mem[nearest].dist, num, unit);
-    oled.setFont(u8g2_font_9x15_te); oled.drawUTF8(66, 38, mem[nearest].ini);
-    snprintf(b, sizeof b, "%s %s", num, unit);
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(66, 50, b);
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(68, 17, "NEAR");
+    oled.setFont(u8g2_font_7x13B_tf); oled.drawUTF8(68, 30, mem[nearest].ini);
+    fmtRng(mem[nearest].dist, num, &u); snprintf(b, sizeof b, "%s%s", num, u);
+    oled.setFont(u8g2_font_6x10_tf); oled.drawStr(127 - oled.getStrWidth(b), 30, b);
   }
   if (navFresh) {
-    fmtDist(nav.dist, num, unit); snprintf(b, sizeof b, "%s %s", num, unit);
-    drawFlag(67, 62); oled.drawUTF8(75, 63, b);
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(68, 40, "TGT");
+    fmtRng(nav.dist, num, &u); snprintf(b, sizeof b, "%s%s", num, u);
+    oled.setFont(u8g2_font_6x10_tf); diamond(71, 47, 2, true); oled.drawStr(127 - oled.getStrWidth(b), 51, b);
   }
-  drawStatusRow();
+  char cnt[12]; snprintf(cnt, sizeof cnt, "%d", memN); oled.setFont(u8g2_font_4x6_tf); oled.drawStr(84, 17, "x"); oled.drawStr(88, 17, cnt);
+  drawBottom(nullptr);
 }
 
 void drawNav() {
@@ -351,63 +394,84 @@ void drawNav() {
   bool fresh = connected && nav.has && now - nav.at < 30000;
   bool memFresh = connected && memN > 0 && now - memAt < 30000;
   if (memFresh && (viewMode == 1 || !fresh)) { drawRadar(fresh); return; }
-  if (fresh && nav.dist < 25) {
-    oled.drawCircle(32, 32, 24); oled.drawCircle(32, 32, 14); oled.drawDisc(32, 32, 4);
-    oled.setFont(u8g2_font_10x20_te); oled.drawUTF8(80, 40, "ČIA");
-  } else if (fresh) {
-    if (headingOk) drawArrow(32, 32, 28, wrap180(nav.brg - heading));
-    else { oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(4, 36, "kompasas?"); }
-    char num[12], unit[4]; fmtDist(nav.dist, num, unit);
-    oled.setFont(u8g2_font_logisoso22_tr);
-    int w = oled.getStrWidth(num);
-    if (w > 60) { oled.setFont(u8g2_font_logisoso16_tr); w = oled.getStrWidth(num); }
-    oled.drawStr(126 - w, 40, num);
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(126 - oled.getUTF8Width(unit), 52, unit);
-    if (now - nav.at > 8000) oled.drawStr(66, 52, "?");
+  drawTape(fresh, nav.brg);
+  char b[24], num[12]; const char *u;
+  // kairė: kryptis
+  oled.setFont(u8g2_font_4x6_tf); oled.drawStr(0, 25, "HDG");
+  oled.setFont(u8g2_font_7x13B_tf);
+  if (headingOk) { snprintf(b, sizeof b, "%03d", (int)lroundf(heading) % 360); oled.drawStr(0, 38, b); oled.drawCircle(23, 29, 1); }
+  else oled.drawStr(0, 38, imuOk ? "---" : "IMU!");
+  // centras: taikiklis
+  brackets(42, 20, 86, 50, 6);
+  if (fresh && nav.dist < 25) {                               // atvykai
+    bool on = blink(300);
+    if (on) oled.drawBox(46, 24, 37, 23);
+    oled.setDrawColor(on ? 0 : 1); oled.setFont(u8g2_font_7x13B_tf); oled.drawStr(50, 35, "ON"); oled.drawStr(50, 45, "TGT"); oled.setDrawColor(1);
+  } else if (fresh && headingOk) {
+    drawArrow(64, 35, 12, wrap180(nav.brg - heading));
+    oled.drawPixel(64, 35);
   } else {
-    // nėra tikslo – rodom kompasą
-    oled.drawCircle(32, 32, 27);
-    if (headingOk) {
-      drawArrow(32, 32, 22, wrap180(-heading));   // rodyklė į šiaurę
-      char b[8]; sprintf(b, "%d°", (int)lroundf(heading) % 360);
-      oled.setFont(u8g2_font_logisoso16_tf); oled.drawUTF8(126 - oled.getUTF8Width(b), 38, b);
-    } else if (!imuOk) { oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(70, 36, "nėra kompaso"); }
-    oled.setFont(u8g2_font_6x12_te);
-    oled.drawUTF8(66, 52, !connected ? "Laukiu tel." : nav.has ? "Senas tikslas" : "Nėra tikslo");
+    oled.drawHLine(58, 35, 13); oled.drawVLine(64, 29, 13);  // kryželis
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(54, 48, fresh ? "IMU?" : "NO TGT");
   }
-  if (fresh && nav.title[0]) {
-    char t[14]; copyStr(t, nav.title, sizeof t);
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(66, 63, t);
+  // dešinė: atstumas ir azimutas
+  if (fresh) {
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(91, 25, "RNG");
+    fmtRng(nav.dist, num, &u);
+    oled.setFont(u8g2_font_logisoso16_tr); int w = oled.getStrWidth(num);
+    if (w > 36) { oled.setFont(u8g2_font_7x13B_tf); w = oled.getStrWidth(num); }
+    oled.drawStr(127 - w, 41, num);
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(127 - oled.getStrWidth(u), 48, u);
+    if (now - nav.at > 8000 && blink(400)) oled.drawStr(91, 48, "OLD");
+    oled.setFont(u8g2_font_4x6_tf); snprintf(b, sizeof b, "BRG %03d", (int)lroundf(nav.brg) % 360); oled.drawStr(0, 48, b);
+  } else {
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(91, 25, "RNG"); oled.setFont(u8g2_font_7x13B_tf); oled.drawStr(100, 41, "---");
   }
-  drawStatusRow();
+  char t[16] = ""; if (fresh) copyStr(t, nav.title, sizeof t);
+  drawBottom(fresh ? t : (connected ? "" : nullptr));
 }
 
 void drawMsg() {
-  oled.setDrawColor(1); oled.drawBox(0, 0, 128, 13);
-  oled.setDrawColor(0); oled.setFont(u8g2_font_6x12_te);
-  oled.drawUTF8(2, 10, msgFrom[0] ? msgFrom : "311 VoiceCH");
-  oled.setDrawColor(1);
+  oled.drawFrame(0, 0, 128, 64);
+  oled.setDrawColor(1); oled.drawBox(0, 0, 128, 11); oled.setDrawColor(0);
+  oled.setFont(u8g2_font_5x7_tf); oled.drawStr(2, 8, "MSG");
+  oled.setFont(u8g2_font_6x12_te); char b[40]; snprintf(b, sizeof b, "// %s", msgFrom[0] ? msgFrom : "311");
+  oled.drawUTF8(22, 9, b); oled.setDrawColor(1);
   oled.setFont(u8g2_font_9x15_te);
-  if (wrapDraw(msgText, 1, 29, 126, 16, 3) >= 3 && strlen(msgText) > 40) {
-    // per ilgas – mažesnis šriftas
-    oled.setDrawColor(0); oled.drawBox(0, 14, 128, 50); oled.setDrawColor(1);
-    oled.setFont(u8g2_font_6x12_te); wrapDraw(msgText, 1, 25, 126, 12, 4);
+  if (wrapDraw(msgText, 4, 28, 120, 16, 3) >= 3 && strlen(msgText) > 36) {
+    oled.setDrawColor(0); oled.drawBox(1, 12, 126, 51); oled.setDrawColor(1);
+    oled.setFont(u8g2_font_6x12_te); wrapDraw(msgText, 4, 24, 120, 12, 4);
   }
 }
 
 void drawAlarm() {
-  bool inv = (millis() / 350) % 2;
-  if (inv) { oled.setDrawColor(1); oled.drawBox(0, 0, 128, 64); oled.setDrawColor(0); }
+  bool inv = blink(300);
+  // įspėjamosios juostos kraštuose
+  for (int x = -8; x < 136; x += 8) { oled.drawLine(x, 0, x + 6, 6); oled.drawLine(x + 1, 0, x + 7, 6); oled.drawLine(x, 57, x + 6, 63); oled.drawLine(x + 1, 57, x + 7, 63); }
+  if (inv) { oled.drawBox(0, 8, 128, 48); oled.setDrawColor(0); }
   bool isStop = strstr(alarmText, "STOP") || strstr(alarmText, "stop") || strstr(alarmText, "Stop");
   if (isStop) {
-    oled.setFont(u8g2_font_logisoso32_tr);
-    oled.drawStr((128 - oled.getStrWidth("STOP")) / 2, 40, "STOP");
+    oled.setFont(u8g2_font_logisoso32_tr); oled.drawStr((128 - oled.getStrWidth("STOP")) / 2, 45, "STOP");
+    oled.setFont(u8g2_font_4x6_tf); oled.drawStr(2, 16, "!! ALERT"); oled.drawStr(126 - oled.getStrWidth("ALL STOP !!"), 16, "ALL STOP !!");
   } else {
-    oled.setFont(u8g2_font_9x15_te); wrapDraw(alarmText, 2, 16, 124, 16, 3);
+    oled.setFont(u8g2_font_9x15_te); wrapDraw(alarmText, 4, 24, 120, 15, 2);
   }
-  oled.setFont(u8g2_font_6x12_te);
-  oled.drawUTF8((128 - oled.getUTF8Width(alarmFrom)) / 2, 60, alarmFrom);
+  oled.setFont(u8g2_font_6x12_te); char b[40]; snprintf(b, sizeof b, "FROM %s", alarmFrom);
+  oled.drawUTF8((128 - oled.getUTF8Width(b)) / 2, 54, b);
   oled.setDrawColor(1);
+}
+
+void drawBoot(uint32_t t) {                                   // paleidimo ekranas
+  oled.clearBuffer();
+  brackets(0, 0, 127, 63, 8);
+  oled.setFont(u8g2_font_7x13B_tf); oled.drawStr(18, 17, "311 VOICECH");
+  oled.setFont(u8g2_font_4x6_tf); oled.drawStr(36, 25, "HUD MK2 // v" FW_VER);
+  oled.drawStr(8, 38, "IMU"); oled.drawStr(8, 46, "BLE"); oled.drawStr(8, 54, "BAT");
+  oled.drawStr(30, 38, t > 1 ? (imuOk ? "OK" : "--") : "..");
+  oled.drawStr(30, 46, t > 2 ? "ADV" : "..");
+  oled.drawStr(30, 54, t > 3 ? (battMv ? "OK" : "N/A") : "..");
+  oled.drawFrame(60, 40, 60, 7); oled.drawBox(62, 42, min<int>(56, t * 14), 3);
+  oled.sendBuffer();
 }
 
 // ---------------- pagrindinis ----------------
@@ -424,12 +488,8 @@ void setup() {
   oled.begin();
   oled.enableUTF8Print();
   applyDisplay();
-  oled.clearBuffer();
-  oled.setFont(u8g2_font_9x15_te); oled.drawUTF8(10, 28, "311 VoiceCH");
-  oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(10, 46, "monoklis v" FW_VER);
-  oled.sendBuffer();
-
-  imuBegin();
+  drawBoot(0);
+  imuBegin(); drawBoot(2);
 
   uint64_t mac = ESP.getEfuseMac();
   char name[24]; snprintf(name, sizeof name, "311-Monoklis-%02X%02X", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
@@ -445,7 +505,7 @@ void setup() {
   adv->addServiceUUID(SVC_UUID);
   adv->setScanResponse(true);
   BLEDevice::startAdvertising();
-  delay(600);
+  battPoll(); drawBoot(3); delay(300); drawBoot(4); delay(500);
 }
 
 void loop() {
@@ -481,8 +541,8 @@ void loop() {
   else if (millis() < msgUntil) drawMsg();
   else drawNav();
   if (btnDown) {                                       // kalbi – žymė viršuje kairėje
-    oled.setDrawColor(1); oled.drawBox(0, 0, 40, 11); oled.setDrawColor(0);
-    oled.setFont(u8g2_font_6x12_te); oled.drawUTF8(3, 9, connected ? "KALBI" : "BT --"); oled.setDrawColor(1);
+    oled.setDrawColor(0); oled.drawBox(40, 54, 48, 10); oled.setDrawColor(1); oled.drawFrame(40, 54, 48, 10);
+    oled.setFont(u8g2_font_5x7_tf); oled.drawStr(44, 62, connected ? (blink(250) ? "* TX *" : "  TX  ") : "NO LNK");
   }
   oled.sendBuffer();
 }
