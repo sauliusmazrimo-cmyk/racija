@@ -156,10 +156,11 @@ body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#
 .cmdChip:active{transform:scale(.96)}
 #hist li.cmd .who{color:var(--accent2)}
 /* pranešimai: medikas, pastiprinimas, priešas */
-#repBar{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
-.repBtn{position:relative;overflow:hidden;height:46px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);
-  font:700 13px/1.1 inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
-.repBtn i{font-style:normal;font-size:17px}
+#repBar{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+.repBtn{position:relative;overflow:hidden;min-height:40px;padding:5px 8px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);
+  font:700 13px/1.15 inherit;display:flex;align-items:center;gap:6px;text-align:left;touch-action:none;user-select:none;-webkit-user-select:none}
+.repBtn i{font-style:normal;font-size:18px;flex:none}
+.repBtn span:not(.rf){min-width:0;overflow-wrap:anywhere}
 .repBtn .rf{position:absolute;left:0;top:0;bottom:0;width:0;pointer-events:none;opacity:.6}
 .repBtn.hold .rf{width:100%;transition:width .7s linear}
 .repBtn span{position:relative}
@@ -336,9 +337,9 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
     <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
     <div id="cmdChips"></div>
     <div id="repBar">
-      <button class="repBtn" data-k="medU"><span class="rf"></span><i>🩸</i><span>MEDIKAS!</span></button>
+      <button class="repBtn" data-k="medU"><span class="rf"></span><i>🩸</i><span>MEDIKAS skubu</span></button>
       <button class="repBtn" data-k="medN"><span class="rf"></span><i>🩹</i><span>Medikas</span></button>
-      <button class="repBtn" data-k="reinf"><span class="rf"></span><i>🛡️</i><span>Pastiprin.</span></button>
+      <button class="repBtn" data-k="reinf"><span class="rf"></span><i>🛡️</i><span>Pastiprinimas</span></button>
       <button class="repBtn" data-k="enemy"><span class="rf"></span><i>⚠️</i><span>Priešas</span></button>
     </div>
   </div>
