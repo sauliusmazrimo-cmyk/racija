@@ -155,6 +155,29 @@ body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#
 .cmdChip.edit{border-color:var(--line);background:var(--panel);color:var(--muted);font-weight:500}
 .cmdChip:active{transform:scale(.96)}
 #hist li.cmd .who{color:var(--accent2)}
+/* pranešimai: medikas, pastiprinimas, priešas */
+#repBar{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.repBtn{position:relative;overflow:hidden;height:46px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);
+  font:700 13px/1.1 inherit;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
+.repBtn i{font-style:normal;font-size:17px}
+.repBtn .rf{position:absolute;left:0;top:0;bottom:0;width:0;pointer-events:none;opacity:.6}
+.repBtn.hold .rf{width:100%;transition:width .7s linear}
+.repBtn span{position:relative}
+.repBtn[data-k=medU]{border-color:rgba(231,76,60,.7);background:rgba(231,76,60,.16)}.repBtn[data-k=medU] .rf{background:#e74c3c}
+.repBtn[data-k=medN]{border-color:rgba(255,138,31,.6);background:rgba(255,138,31,.12)}.repBtn[data-k=medN] .rf{background:#ff8a1f}
+.repBtn[data-k=reinf]{border-color:rgba(63,169,245,.6);background:rgba(63,169,245,.12)}.repBtn[data-k=reinf] .rf{background:#3fa9f5}
+.repBtn[data-k=enemy]{border-color:rgba(241,196,15,.7);background:rgba(241,196,15,.12)}.repBtn[data-k=enemy] .rf{background:#f1c40f}
+.repIcon{font-size:26px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.7))}
+.repIcon.medU,.repIcon.enemy{animation:repPulse 1.2s infinite}
+@keyframes repPulse{50%{transform:scale(1.25)}}
+#cmdBanner.rep-medU,#cmdBanner.rep-enemy{background:#7a1d16;border-color:#e74c3c}
+#cmdBanner.rep-reinf{background:#123a5c;border-color:#3fa9f5}
+.repPop b{display:block;font-size:15px;margin-bottom:2px}.repPop small{display:block;color:#555}
+.repPop .pb{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.repPop .pb button{flex:1;padding:7px 8px;border-radius:8px;border:0;font-weight:700;background:#e9ecef;color:#111}
+.repPop .pb button.ok{background:#2ecc71;color:#000}
+.chipSel{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}.chipSel button{padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:600 14px inherit}
+.chipSel button.on{background:var(--accent);border-color:var(--accent);color:#000}
+.pRow.rep .pn{font-weight:700}
 #hist li.alarm{border-color:rgba(231,76,60,.6);background:rgba(231,76,60,.12)}
 #hist li.alarm .who{color:#ff6b5b}
 /* signalas */
@@ -312,6 +335,12 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
   <div id="cmdBar">
     <button id="stopBtn"><span class="fill"></span><b>🚨 STOP VISIEMS</b><small>laikyk 1 s</small></button>
     <div id="cmdChips"></div>
+    <div id="repBar">
+      <button class="repBtn" data-k="medU"><span class="rf"></span><i>🩸</i><span>MEDIKAS!</span></button>
+      <button class="repBtn" data-k="medN"><span class="rf"></span><i>🩹</i><span>Medikas</span></button>
+      <button class="repBtn" data-k="reinf"><span class="rf"></span><i>🛡️</i><span>Pastiprin.</span></button>
+      <button class="repBtn" data-k="enemy"><span class="rf"></span><i>⚠️</i><span>Priešas</span></button>
+    </div>
   </div>
   <div id="pttWrap"><button id="ptt">KALBĖTI<small>laikyk nuspaudęs</small></button></div>
 
@@ -589,6 +618,7 @@ async function handleMsg(ev){
       me.owner = m.owner; me.admin = m.admin;
       upsertSaved({ name:m.channel, pw, viaAdmin, owner:m.owner, e2:!!m.e2ee, last:Date.now() });
       await decItems(m.history); m.meet = await decMeet(m.meet); m.locs = await decLocs(m.locs);
+      reports = []; for (const x of m.reports||[]){ const r=await decRep(x); if (r) reports.push(r); } renderReports();
       if (m.timer) m.timer.title = await dx(m.timer.title);
       if (pending){ closeModal(); }
       enterChannelUI(m.history);
@@ -699,6 +729,16 @@ async function handleMsg(ev){
       break;
     case 'timerCode': if (cur){ cur.timerCode=m.on; if ($('tmMark')) timerModal(); } break;
     case 'locs': setLocs(await decLocs(m.list), m.now); break;
+    case 'report': {
+      const r = await decRep(m.rep); if (m.item && m.item.cmd) m.item.cmd = await dx(m.item.cmd);
+      if (m.item) addHist(m.item);
+      if (r){ upsertRep(r); if (m.from!==myName && seenCid(m.cid)) alertReport(r); else if (m.from===myName && r.kind==='enemy' && pending && pending.enemyDet){ pending=null; enemyModal(r.id); } }
+      break;
+    }
+    case 'reportUpd': { const r = await decRep(m.rep); if (r) upsertRep(r); break; }
+    case 'reportDel':
+      if (m.item && m.item.cmd) m.item.cmd = await dx(m.item.cmd);
+      reports = reports.filter(x=>x.id!==m.id); if (m.item) addHist(m.item); renderReports(); break;
     case 'meet':
       m.meet = await decMeet(m.meet); if (m.item && m.item.cmd) m.item.cmd = await dx(m.item.cmd);
       setMeet(m.meet); if (m.item) addHist(m.item);
@@ -1205,6 +1245,10 @@ function addHist(i){
     li.className='cmd';
     const what = i.timer==='stop' ? 'sustabdė laikmatį' : (i.timer==='extend'?'pratęsė iki ':'nustatė iki ')+hhmm(i.end);
     li.innerHTML=`<span class="who">⏰ ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)} ${what}</small></span><span class="t">${time}</span>`;
+  } else if (i.rep){
+    const urg = i.alarm || /^(🩸|⚠️)/.test(i.cmd||'');
+    li.className = urg && !/^✔/.test(i.cmd||'') ? 'alarm' : 'cmd';
+    li.innerHTML=`<span class="who">${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)}</small></span><span class="t">${time}</span>`;
   } else if (i.cmd){
     li.className = i.alarm ? 'alarm' : 'cmd';
     li.innerHTML=`<span class="who">${i.alarm?'🚨':'📢'} ${esc(i.cmd)} <small style="color:var(--muted);font-weight:500">· ${esc(i.from)}</small></span><span class="t">${time}</span>`;
@@ -1277,7 +1321,8 @@ function fmtAgo(ts){ const s=Math.max(0,Math.round((sNow()-ts)/1000)); return s<
 function setLocs(list, now){ if (now) srvOff = now - Date.now(); locs = list||[]; renderMapBtn(); if (hudReady()) ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
 function renderMapBtn(){
   const n=locs.length, me=!!shareState();
-  $('mapBtn').textContent = '🗺️ Žemėlapis' + (n ? ` (${n})` : '');
+  const nr = (typeof reports!=='undefined') ? reports.length : 0;
+  $('mapBtn').textContent = '🗺️ Žemėlapis' + (n ? ` (${n})` : '') + (nr ? ` · ⚠️${nr}` : '');
   $('mapBtn').classList.toggle('on', me);
   const b=$('shareBtn'); const st=shareState();
   b.classList.toggle('on', !!st);
@@ -1302,7 +1347,7 @@ function startGeo(){
   if (geoWatch!==null) return;
   if (!('geolocation' in navigator)){ toast('Šis telefonas neleidžia nustatyti vietos'); return; }
   geoWatch = navigator.geolocation.watchPosition(p=>{
-    myPos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy};
+    myPos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now()};
     sendLoc(false); renderMeetCard(); if (map && !$('mapView').classList.contains('hidden')) renderMap();
   }, e=>{
     if (e.code===1){ // leidimas atmestas
@@ -1575,6 +1620,7 @@ $('placeCancel').onclick = () => { placing=false; $('placeHint').classList.add('
 function onMapClick(e){
   if (!placing) return;
   const p=placing; placing=false; $('placeHint').classList.add('hidden');
+  if (p.rep){ updateReport(p.rep, {lat:e.latlng.lat, lon:e.latlng.lng}); return; }
   meetMsg(e.latlng.lat, e.latlng.lng, p.title, p.code).then(wsSend);
 }
 
@@ -1598,14 +1644,15 @@ function renderMap(){
     } else { mk.setLatLng([p.lat,p.lon]); mk.setStyle({fillColor:col}); mk.setTooltipContent(esc(label)); }
   }
   for (const [id, mk] of mapMarkers) if (!seen.has(id)){ map.removeLayer(mk); mapMarkers.delete(id); }
-  renderMeetOnMap();
+  renderMeetOnMap(); renderRepsOnMap();
   const all = pts.map(p=>[p.lat,p.lon]); if (meet) all.push([meet.lat, meet.lon]);
+  for (const r of reports) if (r.lat!=null) all.push([r.lat, r.lon]);
+  renderMapList();
   if (!mapFitted && all.length){
-    mapFitted = true;
+    mapFitted = true; map.invalidateSize();
     if (all.length===1) map.setView(all[0], 16);
     else map.fitBounds(L.latLngBounds(all), {padding:[50,50], maxZoom:17});
   }
-  renderMapList();
 }
 function renderMapList(){
   const st=shareState();
@@ -1613,14 +1660,152 @@ function renderMapList(){
   const rows = locs.filter(l=>l.id!==myLocId).sort((a,b)=> myPos ? distM(myPos,a)-distM(myPos,b) : a.name.localeCompare(b.name));
   const meetRow = meet ? `<button class="pRow meet" data-meet="1"><span style="font-size:18px">🚩</span><span class="pn">${esc(meet.title)}</span>
       <span class="pi">${myPos ? fmtDist(distM(myPos,meet))+' '+dirText(myPos,meet) : 'įjunk vietą atstumui'}</span></button>` : '';
-  $('mapList').innerHTML = meetRow + (rows.length ? rows.map(l=>`<button class="pRow" data-id="${esc(l.id)}"><span class="pd" style="background:${personColor(l)}"></span>
+  const repRows = reports.filter(r=>r.lat!=null).sort((a,b)=>REP[a.kind].prio-REP[b.kind].prio || b.ts-a.ts).map(r=>`<button class="pRow rep" data-rep="${r.id}"><span style="font-size:18px">${REP[r.kind].icon}</span>
+      <span class="pn">${esc(REP[r.kind].short)} · ${esc(r.by)}</span><span class="pi">${myPos?fmtDist(distM(myPos,r))+' '+dirText(myPos,r)+' · ':''}${fmtAgo(r.upd||r.ts)}</span></button>`).join('');
+  $('mapList').innerHTML = repRows + meetRow + (rows.length ? rows.map(l=>`<button class="pRow" data-id="${esc(l.id)}"><span class="pd" style="background:${personColor(l)}"></span>
       <span class="pn">${esc(l.name)}</span><span class="pi">${myPos?fmtDist(distM(myPos,l))+' nuo tavęs · ':''}${meet?'🚩 '+fmtDist(distM(l,meet))+' · ':''}${fmtAgo(l.ts)}</span></button>`).join('')
     : `<p class="muted" style="text-align:center">Kiti nariai dar nerodo savo vietos.<br>Paprašyk jų paspausti <b style="color:var(--text)">📍 Rodyti mane</b>.</p>`);
   $('mapList').querySelectorAll('.pRow').forEach(b=>b.onclick=()=>{
     if (b.dataset.meet){ if (meet && map) map.setView([meet.lat,meet.lon], 17); return; }
+    if (b.dataset.rep){ const r=reports.find(x=>x.id==b.dataset.rep); if (r && map){ map.setView([r.lat,r.lon], 17); const mk=repMarkers.get(r.id); if (mk) mk.openPopup(); } return; }
     const l=locs.find(x=>x.id===b.dataset.id); if (l && map) map.setView([l.lat,l.lon], 17); });
   renderMapBtn();
 }
+
+// ---------- pranešimai: medikas, pastiprinimas, priešas ----------
+const REP = {
+  medU:  {icon:'🩸', label:'🩸 MEDIKAS – SKUBU', short:'Medikas SKUBU', prio:0, vib:[300,100,300,100,600]},
+  enemy: {icon:'⚠️', label:'⚠️ PRIEŠAS', short:'Priešas', prio:1, vib:[100,60,100,60,100,60,400]},
+  medN:  {icon:'🩹', label:'🩹 Medikas – neskubu', short:'Medikas', prio:2, vib:[200,100,200]},
+  reinf: {icon:'🛡️', label:'🛡️ Reikia pastiprinimo', short:'Pastiprinimas', prio:3, vib:[150,80,150,80,150]},
+};
+const EN_OPTS = { n:['1','2–5','6–10','10+'], act:['Stebi','Juda','Šaudo','Įsitvirtinę','Atsitraukia'], eq:['Pėstininkai','Technika','Dronas','Snaiperis','Minos'],
+  dir:['Š','ŠR','R','PR','P','PV','V','ŠV'] };
+let reports = [], repMarkers = new Map();
+async function decRep(r){
+  if (!r) return null;
+  if (!r.enc) return REP[r.kind] ? r : null;
+  try{ const j=JSON.parse(await dx(r.enc)); if (!REP[j.kind]) return null; return {id:r.id, by:r.by, ts:r.ts, upd:r.upd, kind:j.kind, lat:j.lat, lon:j.lon, det:j.det||{}}; }catch{ return null; }
+}
+function upsertRep(r){ const i=reports.findIndex(x=>x.id===r.id); if (i>=0) reports[i]=r; else reports.push(r); renderReports(); }
+function renderReports(){ renderMapBtn(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
+function getPosOnce(ms){
+  return new Promise(res=>{
+    if (myPos && myPos.t && Date.now()-myPos.t < 60000) return res(myPos);
+    if (!navigator.geolocation) return res(myPos);
+    let done=false; const fin=v=>{ if(!done){ done=true; res(v); } };
+    setTimeout(()=>fin(myPos), ms);
+    navigator.geolocation.getCurrentPosition(p=>{ myPos={lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now()}; fin(myPos); }, ()=>fin(myPos), {enableHighAccuracy:true, timeout:ms, maximumAge:30000});
+  });
+}
+function detText(d){
+  if (!d) return '';
+  return [d.n && d.n+' prieš.', d.act, d.eq, d.dir && 'kryptis '+d.dir, d.note].filter(Boolean).join(' · ');
+}
+async function repMsg(t, base, r){
+  if (isE2()) return {...base, t, enc: await ex(JSON.stringify({kind:r.kind, lat:r.lat, lon:r.lon, det:r.det||{}})), label: await ex(base.labelText)};
+  return {...base, t, kind:r.kind, lat:r.lat, lon:r.lon, det:r.det||{}};
+}
+async function sendReport(kind){
+  if (licLocked()){ flash('Licencija baigėsi'); return; }
+  const online = ws && ws.readyState===1 && cur && scrVisible('scrChan'), lora = meshReady();
+  if (!online && !lora){ flash('Nėra ryšio'); return; }
+  if (online && isE2() && !cur.key){ flash('Šifruotas kanalas – reikia slaptažodžio'); return; }
+  vib(REP[kind].vib.slice(0,3)); flash(REP[kind].short + ' – siunčiama…');
+  const pos = await getPosOnce(5000);
+  const cid = newCid(); seenCid(cid);
+  const r = {kind, lat: pos ? +pos.lat.toFixed(6) : null, lon: pos ? +pos.lon.toFixed(6) : null, det:{}};
+  const via=[];
+  if (online){
+    if (kind==='enemy') pending={enemyDet:true};
+    const msg = await repMsg('report', {cid, labelText: REP[kind].label}, r); delete msg.labelText; wsSend(msg); via.push('internetu');
+  }
+  if (lora){
+    const txt = `${REP[kind].label}${pos?' '+pos.lat.toFixed(5)+','+pos.lon.toFixed(5):''} · ${myName} #${cid}`;
+    try{ if (Native311.meshSend(txt, cid)) via.push('LoRa'); }catch{}
+  }
+  toast(`${REP[kind].icon} Išsiųsta ${via.join(' + ')}${pos?'':' (be vietos – įjunk GPS)'}`);
+  if (!online && kind==='enemy') toast('Detales galėsi pridėti, kai bus internetas');
+}
+async function updateReport(id, chg){
+  const r = reports.find(x=>x.id===id); if (!r) return;
+  const nr = {...r, ...chg, det: chg.det ? chg.det : r.det};
+  const msg = await repMsg('reportUpdate', {id, labelText:''}, nr); delete msg.labelText; delete msg.label; wsSend(msg);
+}
+async function resolveReport(id){
+  const r = reports.find(x=>x.id===id); if (!r) return;
+  wsSend({t:'reportDel', id, label: await ex('✔ Išspręsta: ' + REP[r.kind].label)});
+}
+function alertReport(r){
+  const d = REP[r.kind];
+  const where = myPos && r.lat!=null ? fmtDist(distM(myPos,r)) + ' ' + dirText(myPos,r) : (r.lat==null ? 'be vietos' : '');
+  showBanner(d.label, `${r.by}${where?' · '+where:''}${detText(r.det)?' · '+detText(r.det):''}`, r.kind==='medU'||r.kind==='enemy' ? 12000 : 7000);
+  const b=$('cmdBanner'); b.className = 'rep-'+r.kind; b.onclick = () => { b.classList.add('hidden'); openMap().then(()=>setTimeout(()=>{ if (map && r.lat!=null){ mapFitted=true; map.invalidateSize(); map.setView([r.lat,r.lon], 17); const mk=repMarkers.get(r.id); if (mk) mk.openPopup(); } }, 200)); };
+  if (!where && r.lat!=null) getPosOnce(4000).then(p=>{ if (p && $('cbTxt').textContent===d.label) $('cbFrom').textContent = `${r.by} · ${fmtDist(distM(p,r))} ${dirText(p,r)}${detText(r.det)?' · '+detText(r.det):''}`; });
+  vib(d.vib);
+  if (ctx){ const t0=ctx.currentTime, n = r.kind==='medU' ? 4 : 2; for (let i=0;i<n;i++) beep(r.kind==='enemy'?740:1046, t0+i*0.22, 0.15); }
+  if (r.kind!=='enemy') speak(d.short + '. ' + r.by);
+  hudMsg('M', d.short + (where?' '+where:''), r.by);
+}
+function repPopup(r){
+  return `<div class="repPop"><b>${esc(REP[r.kind].label)}</b><small>${esc(r.by)} · ${fmtAgo(r.upd||r.ts)}${myPos?' · '+fmtDist(distM(myPos,r))+' '+dirText(myPos,r):''}</small>
+    ${detText(r.det)?`<small style="color:#222;margin-top:4px">${esc(detText(r.det))}</small>`:''}
+    <div class="pb"><button class="ok" data-rep-act="done" data-id="${r.id}">✔ Išspręsta</button>
+    ${r.kind==='enemy'?`<button data-rep-act="det" data-id="${r.id}">✎ Detalės</button>`:''}<button data-rep-act="move" data-id="${r.id}">↔ Perkelti</button></div></div>`;
+}
+function renderRepsOnMap(){
+  if (!map) return;
+  const seen=new Set();
+  for (const r of reports){
+    if (r.lat==null) continue;
+    seen.add(r.id);
+    let mk = repMarkers.get(r.id);
+    const icon = L.divIcon({className:'repIcon '+r.kind, html:REP[r.kind].icon, iconSize:[30,30], iconAnchor:[15,15]});
+    if (!mk){ mk = L.marker([r.lat,r.lon], {icon, zIndexOffset: 2000 - REP[r.kind].prio*100}).bindPopup(repPopup(r)).addTo(map); repMarkers.set(r.id, mk); }
+    else { mk.setLatLng([r.lat,r.lon]); mk.setPopupContent(repPopup(r)); }
+  }
+  for (const [id, mk] of repMarkers) if (!seen.has(id)){ map.removeLayer(mk); repMarkers.delete(id); }
+}
+document.addEventListener('click', e=>{
+  const b = e.target.closest('[data-rep-act]'); if (!b) return;
+  const id = +b.dataset.id, act = b.dataset.repAct;
+  if (map) map.closePopup();
+  if (act==='done') resolveReport(id);
+  else if (act==='det') enemyModal(id);
+  else if (act==='move'){ placing={rep:id}; $('placeHint').classList.remove('hidden'); toast('Paspausk žemėlapyje naują vietą'); }
+});
+function enemyModal(id){
+  const r = reports.find(x=>x.id===id); if (!r) return;
+  const d = {...(r.det||{})};
+  const grp = (k, title) => `<label class="muted" style="font-size:13px">${title}</label><div class="chipSel" data-g="${k}">${EN_OPTS[k].map(v=>`<button data-v="${esc(v)}" class="${d[k]===v?'on':''}">${esc(v)}</button>`).join('')}</div>`;
+  openModal(`<h2>⚠️ Priešas – detalės</h2>
+    <p class="muted" style="font-size:13px">Žymė jau išsiųsta. Pasirink, kas žinoma – kiti pamatys iškart.</p>
+    ${grp('n','Kiek')}${grp('act','Ką daro')}${grp('eq','Kas')}${grp('dir','Judėjimo kryptis')}
+    <div class="field"><label>Pastaba</label><input id="enNote" maxlength="200" value="${esc(d.note||'')}" placeholder="pvz. už pastato, 2 automobiliai"></div>
+    <button class="btn" id="enSave">Išsaugoti</button>
+    <button class="btn alt" id="enMove">📍 Priešas kitur – pažymėti žemėlapyje</button>
+    <button class="btn alt" onclick="closeModal()">Uždaryti</button>`);
+  $('modalBox').querySelectorAll('.chipSel').forEach(g=>g.addEventListener('click', e=>{
+    const b=e.target.closest('button'); if (!b) return; const k=g.dataset.g;
+    d[k] = d[k]===b.dataset.v ? undefined : b.dataset.v;
+    g.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x.dataset.v===d[k]));
+  }));
+  $('enSave').onclick = () => { d.note = $('enNote').value.trim() || undefined; Object.keys(d).forEach(k=>d[k]===undefined&&delete d[k]); updateReport(id, {det:d}); closeModal(); toast('⚠️ Detalės išsiųstos'); };
+  $('enMove').onclick = () => { d.note = $('enNote').value.trim() || undefined; Object.keys(d).forEach(k=>d[k]===undefined&&delete d[k]); updateReport(id, {det:d});
+    closeModal(); openMap().then(()=>{ placing={rep:id}; $('placeHint').classList.remove('hidden'); }); };
+}
+// mygtukai: laikyti ~0,7 s
+(()=>{
+  let tm=null, btn=null;
+  const cancel=()=>{ if (tm){ clearTimeout(tm); tm=null; } if (btn) btn.classList.remove('hold'); btn=null; };
+  const bar=$('repBar');
+  bar.addEventListener('pointerdown', e=>{ const b=e.target.closest('.repBtn'); if (!b) return; e.preventDefault(); cancel(); btn=b; b.classList.add('hold'); vib(15);
+    tm=setTimeout(()=>{ tm=null; b.classList.remove('hold'); btn=null; sendReport(b.dataset.k); }, 700); });
+  ['pointerup','pointercancel','pointerleave'].forEach(ev=>bar.addEventListener(ev, cancel));
+  bar.addEventListener('contextmenu', e=>e.preventDefault());
+  bar.addEventListener('click', e=>{ if (e.target.closest('.repBtn') && !tm) {} });
+})();
+setInterval(()=>{ if (reports.length) renderReports(); }, 30000);
 
 // ---------- laikmatis ----------
 let timer=null, srvOff=0, tFired={};
@@ -1823,12 +2008,14 @@ $('alarmOk').onclick = () => {
   if (NATIVE) try{ Native311.alarmStop(); }catch{}
 };
 function showBanner(text, sub, ms=4500){
+  $('cmdBanner').className='hidden'; $('cmdBanner').onclick = () => $('cmdBanner').classList.add('hidden');
   $('cbTxt').textContent = text; $('cbFrom').textContent = sub||'';
   $('cmdBanner').classList.remove('hidden');
   clearTimeout(showCmd.t); showCmd.t=setTimeout(()=>$('cmdBanner').classList.add('hidden'), ms);
 }
 function showCmd(from, text, voice){
   hudMsg('M', text, from);
+  $('cmdBanner').className='hidden'; $('cmdBanner').onclick = () => $('cmdBanner').classList.add('hidden');
   $('cbTxt').textContent = '📢 ' + text;
   $('cbFrom').textContent = from;
   $('cmdBanner').classList.remove('hidden');

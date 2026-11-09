@@ -259,6 +259,24 @@ setInterval(() => {
   }
 }, 30 * 1000);
 
+// ---------- pranešimai žemėlapyje: medikas, pastiprinimas, priešas ----------
+const REP_KINDS = { medU: '🩸 MEDIKAS – SKUBU', medN: '🩹 Medikas – neskubu', reinf: '🛡️ Reikia pastiprinimo', enemy: '⚠️ PRIEŠAS' };
+function repList(ch) {
+  const now = Date.now();
+  ch.reports = (ch.reports || []).filter(r => now - (r.upd || r.ts) < RETENTION_MS);
+  return ch.reports;
+}
+function cleanDet(d) {
+  const o = {}; if (!d || typeof d !== 'object') return o;
+  for (const k of ['n', 'act', 'dir', 'eq']) if (d[k]) o[k] = String(d[k]).slice(0, 40);
+  if (d.note) o.note = String(d.note).slice(0, 200);
+  return o;
+}
+function cleanPos(m) {
+  const lat = Number(m.lat), lon = Number(m.lon);
+  return Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat: +lat.toFixed(6), lon: +lon.toFixed(6) } : null;
+}
+
 // ---------- licencijos (grupei) ----------
 const DAY = 24 * 3600000;
 const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -326,7 +344,7 @@ function attach(ws, name) {
   rt(name).licOk = lic.ok;
   send(ws, { t: 'joined', channel: name, owner: canManage(ws), admin: !!ws.isAdmin, public: !!chn.public, e2ee: !!chn.e2ee, ticket: ws.ticket,
     history: shut ? [] : chn.history, timer: shut ? null : timerView(chn), timerCode: !!chn.timerCode, meet: shut ? null : (chn.meet || null),
-    now: Date.now(), locId: locId(ws), locs: shut ? [] : locList(rt(name)), lic });
+    now: Date.now(), locId: locId(ws), locs: shut ? [] : locList(rt(name)), reports: shut ? [] : repList(chn), lic });
   presence(name);
 }
 
@@ -576,6 +594,45 @@ wss.on('connection', (ws, req) => {
       }
       case 'stop':
         return endTalk(ws);
+
+      // ----- pranešimai žemėlapyje -----
+      case 'report': case 'reportUpdate': case 'reportDel': {
+        if (!ch) return;
+        if (!licOk(ws)) return licDenied(ws);
+        const now = Date.now(), list = repList(ch);
+        const cid = /^[0-9a-z]{6}$/.test(String(m.cid || '')) ? m.cid : undefined;
+        const label = ch.e2ee ? String(m.label || '').slice(0, 400) : null;
+        if (ch.e2ee && (m.t !== 'reportUpdate') && !label.startsWith('e2:')) return err(ws, 'badreport', 'Netinkamas pranešimas');
+        if (m.t === 'report') {
+          let r;
+          if (ch.e2ee) {
+            const enc = String(m.enc || ''); if (!enc.startsWith('e2:') || enc.length > 2000) return err(ws, 'badreport', 'Netinkamas pranešimas');
+            r = { id: ++db.seq, by: ws.user, ts: now, enc };
+          } else {
+            if (!REP_KINDS[m.kind]) return err(ws, 'badreport', 'Netinkamas pranešimas');
+            r = { id: ++db.seq, kind: m.kind, by: ws.user, ts: now, ...(cleanPos(m) || {}), det: cleanDet(m.det) };
+          }
+          list.push(r); while (list.length > 60) list.shift();
+          const item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: ch.e2ee ? label : REP_KINDS[r.kind], rep: true, alarm: !ch.e2ee && (r.kind === 'medU' || r.kind === 'enemy'), cid };
+          ch.history.push(item); while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
+          saveDb();
+          return broadcast(ws.chan, { t: 'report', rep: r, item, from: ws.user, cid });
+        }
+        const r = list.find(x => x.id === Number(m.id));
+        if (!r) return err(ws, 'norep', 'Pranešimas jau pašalintas');
+        if (m.t === 'reportUpdate') {
+          if (ch.e2ee) { const enc = String(m.enc || ''); if (!enc.startsWith('e2:') || enc.length > 2000) return; r.enc = enc; }
+          else { const pos = cleanPos(m); if (pos) Object.assign(r, pos); if (m.det) r.det = cleanDet(m.det); }
+          r.upd = now; saveDb();
+          return broadcast(ws.chan, { t: 'reportUpd', rep: r });
+        }
+        // reportDel – išspręsta (gali bet kuris narys)
+        ch.reports = list.filter(x => x !== r);
+        const item = { id: ++db.seq, from: ws.user, ts: now, dur: 0, cmd: ch.e2ee ? label : '✔ Išspręsta: ' + REP_KINDS[r.kind], rep: true };
+        ch.history.push(item); while (ch.history.length > HISTORY_LIMIT) rmAudio(ch.history.shift().id);
+        saveDb();
+        return broadcast(ws.chan, { t: 'reportDel', id: r.id, from: ws.user, item });
+      }
 
       // ----- kūrėjo veiksmai -----
       case 'clear': {
