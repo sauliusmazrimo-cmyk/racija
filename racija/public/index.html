@@ -278,7 +278,7 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 #meetCard .mt2{flex:1;min-width:0}
 #meetCard b{display:block;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #meetCard small{display:block;color:var(--muted);font-size:13px}
-#mtArrow{font-size:26px;font-weight:900;color:var(--accent);transition:transform .4s;flex:none;width:30px;text-align:center}
+#mtArrow{font-size:26px;font-weight:900;color:var(--accent);flex:none;width:30px;text-align:center}
 #placeHint{padding:10px 16px;background:rgba(231,76,60,.18);color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;gap:10px;justify-content:space-between}
 #placeHint button{background:none;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;padding:5px 10px}
 .flagIcon{font-size:30px;line-height:30px;text-align:center;filter:drop-shadow(0 2px 3px rgba(0,0,0,.6))}
@@ -1461,21 +1461,42 @@ function bearing(a,b){ const r=Math.PI/180, y=Math.sin((b.lon-a.lon)*r)*Math.cos
 function dirText(a,b){ const d=bearing(a,b); return ['↑','↗','→','↘','↓','↙','←','↖'][Math.round(d/45)%8] + ' ' + DIRS[Math.round(d/45)%8]; }
 function setMeet(m){ meet = m || null; renderMeetCard(); renderNav(); ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
 // ---------- kompasas ir navigacija ----------
-const compass = {h:0, ok:false, at:0, acc:null, listening:false};
+const compass = {h:0, target:0, ok:false, at:0, bad:false, listening:false, nat:false, natAt:0, raf:0, last:0};
+const wrapD = d => ((d % 360) + 540) % 360 - 180;
+function setHeading(h, bad){
+  const was = compass.ok;
+  compass.target = (h + 360) % 360; compass.bad = !!bad; compass.at = Date.now();
+  if (!was){ compass.h = compass.target; compass.ok = true; if (navOpen) renderNav(); }
+  compassLoop();
+}
+// greitas Android kompasas iš programėlės (jutiklis ROTATION_VECTOR)
+window.nativeHeading = (h, acc) => { compass.nat = true; compass.natAt = Date.now(); setHeading(h, acc < 2); };
 function onOrient(e){
-  let h = null;
-  if (typeof e.webkitCompassHeading === 'number'){ h = e.webkitCompassHeading; compass.acc = e.webkitCompassAccuracy; }
+  if (compass.nat && Date.now() - compass.natAt < 1500) return;      // yra greitesnis šaltinis
+  let h = null, bad = false;
+  if (typeof e.webkitCompassHeading === 'number'){ h = e.webkitCompassHeading; bad = e.webkitCompassAccuracy > 30; }
   else if (e.absolute && e.alpha != null){
     const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
     h = (360 - e.alpha + scr) % 360;
   }
-  if (h == null) return;
-  const d = ((h - compass.h + 540) % 360) - 180;          // švelninimas per 0/360 ribą
-  compass.h = compass.ok ? (compass.h + d * 0.35 + 360) % 360 : h;
-  const was = compass.ok; compass.ok = true; compass.at = Date.now();
-  if (navOpen){ if (!was) renderNav(); else renderNavDial(); } else if (meet && myPos) renderMeetCard();
+  if (h != null) setHeading(h, bad);
 }
+// piešimas kiekvienam kadrui: rodyklė sklandžiai seka kryptį (~0,06 s), be vėlavimo
+function compassLoop(){
+  if (compass.raf) return;
+  const step = t => {
+    compass.raf = 0;
+    const dt = compass.last ? Math.min(100, t - compass.last) : 16; compass.last = t;
+    const d = wrapD(compass.target - compass.h);
+    compass.h = Math.abs(d) < 0.3 ? compass.target : (compass.h + d * (1 - Math.exp(-dt / 60)) + 360) % 360;
+    if (navOpen) renderNavDial(); else if (meet && myPos && scrVisible('scrChan')) renderMeetArrow();
+    if (Math.abs(d) >= 0.3) compass.raf = requestAnimationFrame(step); else compass.last = 0;
+  };
+  compass.raf = requestAnimationFrame(step);
+}
+const compassNeeded = () => !document.hidden && (navOpen || (meet && cur && scrVisible('scrChan')));
 async function startCompass(){
+  if (NATIVE && Native311.compassStart){ try{ Native311.compassStart(); }catch{} }
   if (compass.listening) return;
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   try{
@@ -1485,9 +1506,21 @@ async function startCompass(){
   }catch{ if (ios) return; }
   compass.listening = true;
   if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOrient, true);
-  window.addEventListener('deviceorientation', onOrient, true);
+  else window.addEventListener('deviceorientation', onOrient, true);
 }
-setInterval(()=>{ if (compass.ok && Date.now()-compass.at > 4000){ compass.ok=false; if (navOpen) renderNav(); } }, 2000);
+function stopCompass(){
+  if (NATIVE && Native311.compassStop){ try{ Native311.compassStop(); }catch{} }
+  if (compass.listening){ window.removeEventListener('deviceorientationabsolute', onOrient, true); window.removeEventListener('deviceorientation', onOrient, true); compass.listening = false; }
+  compass.ok = false;
+}
+// jutiklis veikia tik kai reikia (taupom bateriją)
+setInterval(()=>{
+  const need = compassNeeded();
+  if (need && !compass.listening && !/iPhone|iPad|iPod/.test(navigator.userAgent)) startCompass();
+  else if (!need && (compass.listening || compass.nat)) { stopCompass(); compass.nat = false; }
+  if (compass.ok && Date.now()-compass.at > 4000){ compass.ok=false; if (navOpen) renderNav(); }
+}, 1500);
+document.addEventListener('visibilitychange', ()=>{ if (document.hidden) { stopCompass(); compass.nat=false; } });
 let navOpen=false, navWake=null, navArrived=false;
 (()=>{ const g=document.getElementById('navTicks'); if (!g) return; let h='';
   for (let a=0;a<360;a+=10){ const big=a%30===0, r1=big?88:93, r=Math.PI*a/180; h+=`<line x1="${(Math.sin(r)*r1).toFixed(1)}" y1="${(-Math.cos(r)*r1).toFixed(1)}" x2="${(Math.sin(r)*100).toFixed(1)}" y2="${(-Math.cos(r)*100).toFixed(1)}" stroke="${big?'#4c5866':'#2f3a47'}" stroke-width="${big?2.5:1.5}"/>`; }
@@ -1526,11 +1559,12 @@ function renderNav(){
     if (d>=40) navArrived=false;
   }
   if (!compass.ok){ hint.classList.add('warn'); hint.textContent = compass.listening ? 'Kompasas nepasiekiamas – rodyklė rodo pagal šiaurę (telefono viršų laikyk į šiaurę).' : 'Paspausk čia, kad įjungtum kompasą'; hint.onclick = startCompass; }
-  else if (compass.acc != null && compass.acc > 30){ hint.classList.add('warn'); hint.textContent = 'Kompasas netikslus – pamosuok telefonu aštuoniuke.'; hint.onclick=null; }
+  else if (compass.bad){ hint.classList.add('warn'); hint.textContent = 'Kompasas netikslus – pamosuok telefonu aštuoniuke.'; hint.onclick=null; }
   else { hint.textContent = 'Laikyk telefoną gulsčiai. Rodyklė rodo tikslą, kur bebūtum atsisukęs.'; hint.onclick=null; }
   if (myPos && myPos.acc > 50){ hint.classList.add('warn'); hint.textContent = `GPS netikslus (±${Math.round(myPos.acc)} m) – išeik į atvirą vietą.`; }
   renderNavDial();
 }
+function renderMeetArrow(){ if (meet && myPos) $('mtArrow').style.transform = `rotate(${(bearing(myPos,meet) - (compass.ok ? compass.h : 0)).toFixed(1)}deg)`; }
 function renderMeetCard(){
   const c=$('meetCard');
   if (!meet || !cur){ c.classList.add('hidden'); return; }
@@ -1540,7 +1574,7 @@ function renderMeetCard(){
   if (myPos){
     const d=distM(myPos,meet);
     $('mtInfo').textContent = (d<25 ? 'Tu jau čia' : fmtDist(d) + ' · ' + DIRS[Math.round(bearing(myPos,meet)/45)%8]) + ' · pažymėjo ' + meet.by;
-    $('mtArrow').style.transform = `rotate(${bearing(myPos,meet) - (compass.ok ? compass.h : 0)}deg)`; $('mtArrow').style.opacity = 1;
+    renderMeetArrow(); $('mtArrow').style.opacity = 1;
   } else {
     $('mtInfo').textContent = 'Paspausk, kad matytum atstumą · pažymėjo ' + meet.by;
     $('mtArrow').style.opacity = .3;

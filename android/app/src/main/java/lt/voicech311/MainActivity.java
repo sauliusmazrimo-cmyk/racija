@@ -214,8 +214,12 @@ public class MainActivity extends Activity {
 
     // Svarbu: web.onPause() NEkviečiam, kad garsas ir ryšys veiktų užrakinus ekraną.
 
+    // ---------- kompasas ----------
+    private Compass compass;
+
     @Override
     protected void onDestroy() {
+        if (compass != null) compass.stop();
         instance = null;
         stopService(new Intent(this, VoiceService.class));
         if (web != null) { web.destroy(); }
@@ -360,6 +364,18 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void hudDisconnect() { HudLink hl = hud(); if (hl != null) runOnUiThread(hl::disconnect); }
         @JavascriptInterface public boolean hudSend(String line) { return VoiceService.hudSend(line); }
         @JavascriptInterface public boolean isNative() { return true; }
+        /** Greitas telefono kompasas: kryptis siunčiama į window.nativeHeading(laipsniai, tikslumas 0–3). */
+        @JavascriptInterface public boolean compassStart() {
+            runOnUiThread(() -> {
+                if (compass == null) compass = new Compass(MainActivity.this, (deg, acc) -> {
+                    String js = "window.nativeHeading&&nativeHeading(" + String.format(java.util.Locale.US, "%.1f", deg) + "," + acc + ")";
+                    if (web != null) web.evaluateJavascript(js, null);
+                });
+                compass.start();
+            });
+            return true;
+        }
+        @JavascriptInterface public void compassStop() { runOnUiThread(() -> { if (compass != null) compass.stop(); }); }
         /** Telefono ID (nesikeičia perinstaliavus programėlę) – bandomajam laikotarpiui. */
         @JavascriptInterface public String deviceId() {
             try { return "a:" + Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID); } catch (Exception e) { return ""; }
