@@ -158,7 +158,7 @@ body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#
 /* pranešimai: medikas, pastiprinimas, priešas */
 #repBar{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
 .repBtn{position:relative;overflow:hidden;min-height:40px;padding:5px 8px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);
-  font:700 13px/1.15 inherit;display:flex;align-items:center;gap:6px;text-align:left;touch-action:none;user-select:none;-webkit-user-select:none}
+  font-weight:700;font-size:13px;line-height:1.15;font-family:inherit;display:flex;align-items:center;gap:6px;text-align:left;touch-action:none;user-select:none;-webkit-user-select:none}
 .repBtn i{font-style:normal;font-size:18px;flex:none}
 .repBtn span:not(.rf){min-width:0;overflow-wrap:anywhere}
 .repBtn .rf{position:absolute;left:0;top:0;bottom:0;width:0;pointer-events:none;opacity:.6}
@@ -176,7 +176,7 @@ body.licLocked :is(#ptt,#pttWrap,#stopBtn,#cmdBar,#mapBtn,#timerBtn,#inviteBtn,#
 .repPop b{display:block;font-size:15px;margin-bottom:2px}.repPop small{display:block;color:#555}
 .repPop .pb{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.repPop .pb button{flex:1;padding:7px 8px;border-radius:8px;border:0;font-weight:700;background:#e9ecef;color:#111}
 .repPop .pb button.ok{background:#2ecc71;color:#000}
-.chipSel{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}.chipSel button{padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font:600 14px inherit}
+.chipSel{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 12px}.chipSel button{padding:9px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:var(--text);font-weight:600;font-size:14px;font-family:inherit}
 .chipSel button.on{background:var(--accent);border-color:var(--accent);color:#000}
 .pRow.rep .pn{font-weight:700}
 #hist li.alarm{border-color:rgba(231,76,60,.6);background:rgba(231,76,60,.12)}
@@ -242,6 +242,19 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 #mapBtn{background:none;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:5px 10px;font-size:12px;letter-spacing:0;text-transform:none}
 #mapBtn.on{border-color:var(--ok);color:var(--ok)}
+/* navigacija į susitikimo vietą */
+#navView{position:fixed;inset:0;z-index:16;background:var(--bg);display:flex;flex-direction:column;align-items:center;
+  padding:calc(14px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+#navView .nTop{width:100%;display:flex;align-items:center;gap:10px}
+#navView .nTop b{flex:1;font-size:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#navDial{position:relative;width:min(78vw,46vh);aspect-ratio:1;margin:auto 0 0}
+#navDial svg{width:100%;height:100%;display:block}
+#navDist{font-weight:800;font-size:clamp(44px,15vw,72px);line-height:1;letter-spacing:-1px;margin-top:14px;text-align:center}
+#navSub{color:var(--muted);text-align:center;margin-top:6px;font-size:15px;min-height:20px}
+#navHint{margin:12px 0 auto;padding:10px 14px;border-radius:12px;background:var(--panel);color:var(--muted);font-size:13px;text-align:center;max-width:420px}
+#navHint.warn{color:#f1c40f}
+#navView.here #navDist{color:var(--ok)}
+.nBtns{display:flex;gap:8px;width:100%;max-width:480px}.nBtns .btn{flex:1;margin:0}
 #mapView{position:fixed;inset:0;z-index:15;background:var(--bg);display:flex;flex-direction:column;
   padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
 .mapTop{display:flex;align-items:center;gap:10px;padding:10px 16px}
@@ -357,6 +370,26 @@ select{width:100%;padding:14px;border-radius:12px;border:1px solid var(--line);b
   <div class="txt" id="alarmTxt"></div>
   <div class="from" id="alarmFrom"></div>
   <button id="alarmOk">SUPRATAU</button>
+</div>
+<div id="navView" class="hidden">
+  <div class="nTop"><button class="icon" id="navBack" aria-label="Atgal">←</button><b id="navTitle">🚩</b></div>
+  <div id="navDial"><svg viewBox="-110 -110 220 220">
+    <g id="navRose">
+      <circle r="100" fill="none" stroke="#2a3340" stroke-width="2"/>
+      <g id="navTicks"></g>
+      <text y="-78" text-anchor="middle" fill="#e74c3c" font-size="18" font-weight="800">Š</text>
+      <text x="80" y="6" text-anchor="middle" fill="#7d8a99" font-size="14" font-weight="700">R</text>
+      <text y="90" text-anchor="middle" fill="#7d8a99" font-size="14" font-weight="700">P</text>
+      <text x="-80" y="6" text-anchor="middle" fill="#7d8a99" font-size="14" font-weight="700">V</text>
+    </g>
+    <g id="navArrow"><path d="M0,-72 L30,34 L0,16 L-30,34 Z" fill="#ff8a1f" stroke="#ffb26b" stroke-width="2" stroke-linejoin="round"/></g>
+    <circle r="5" fill="#e6edf3"/>
+    <path d="M0,-108 L-7,-96 L7,-96 Z" fill="#e6edf3"/>
+  </svg></div>
+  <div id="navDist">—</div>
+  <div id="navSub"></div>
+  <div id="navHint"></div>
+  <div class="nBtns"><button class="btn alt" id="navMap">🗺️ Žemėlapis</button><button class="btn alt" id="navEdit">🚩 Keisti</button></div>
 </div>
 <div id="mapView" class="hidden">
   <div class="mapTop">
@@ -1348,8 +1381,8 @@ function startGeo(){
   if (geoWatch!==null) return;
   if (!('geolocation' in navigator)){ toast('Šis telefonas neleidžia nustatyti vietos'); return; }
   geoWatch = navigator.geolocation.watchPosition(p=>{
-    myPos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now()};
-    sendLoc(false); renderMeetCard(); if (map && !$('mapView').classList.contains('hidden')) renderMap();
+    myPos = {lat:p.coords.latitude, lon:p.coords.longitude, acc:p.coords.accuracy, t:Date.now(), spd:p.coords.speed, hdg:p.coords.heading};
+    sendLoc(false); renderMeetCard(); renderNav(); if (map && !$('mapView').classList.contains('hidden')) renderMap();
   }, e=>{
     if (e.code===1){ // leidimas atmestas
       store.del(shareKey()); stopGeo(); renderMapBtn();
@@ -1361,7 +1394,7 @@ function startGeo(){
 function stopGeo(){ if (geoWatch!==null){ navigator.geolocation.clearWatch(geoWatch); geoWatch=null; } clearInterval(stopGeo.iv); lastLocSent=null; }
 let sharingWas=false;
 // vieta sekama, jei ją rodai kitiems arba yra susitikimo vieta (tada tik atstumui skaičiuoti – niekam nesiunčiama)
-function ensureGeo(){ if (shareState() || ((meet || (locs && locs.length)) && hudReady()) || (meet && geoGranted) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
+function ensureGeo(){ if (navOpen || shareState() || ((meet || (locs && locs.length)) && hudReady()) || (meet && geoGranted) || !$('mapView').classList.contains('hidden')) startGeo(); else stopGeo(); }
 let geoGranted=false;
 try{ navigator.permissions && navigator.permissions.query({name:'geolocation'}).then(p=>{ geoGranted = p.state==='granted'; p.onchange=()=>{ geoGranted=p.state==='granted'; }; }).catch(()=>{}); }catch{}
 function startSharing(hours){
@@ -1426,22 +1459,94 @@ function bearing(a,b){ const r=Math.PI/180, y=Math.sin((b.lon-a.lon)*r)*Math.cos
   x=Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos((b.lon-a.lon)*r);
   return (Math.atan2(y,x)/r+360)%360; }
 function dirText(a,b){ const d=bearing(a,b); return ['↑','↗','→','↘','↓','↙','←','↖'][Math.round(d/45)%8] + ' ' + DIRS[Math.round(d/45)%8]; }
-function setMeet(m){ meet = m || null; renderMeetCard(); ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
+function setMeet(m){ meet = m || null; renderMeetCard(); renderNav(); ensureGeo(); if (map && !$('mapView').classList.contains('hidden')) renderMap(); }
+// ---------- kompasas ir navigacija ----------
+const compass = {h:0, ok:false, at:0, acc:null, listening:false};
+function onOrient(e){
+  let h = null;
+  if (typeof e.webkitCompassHeading === 'number'){ h = e.webkitCompassHeading; compass.acc = e.webkitCompassAccuracy; }
+  else if (e.absolute && e.alpha != null){
+    const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    h = (360 - e.alpha + scr) % 360;
+  }
+  if (h == null) return;
+  const d = ((h - compass.h + 540) % 360) - 180;          // švelninimas per 0/360 ribą
+  compass.h = compass.ok ? (compass.h + d * 0.35 + 360) % 360 : h;
+  const was = compass.ok; compass.ok = true; compass.at = Date.now();
+  if (navOpen){ if (!was) renderNav(); else renderNavDial(); } else if (meet && myPos) renderMeetCard();
+}
+async function startCompass(){
+  if (compass.listening) return;
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  try{
+    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function'){   // iPhone prašo leidimo
+      const r = await DeviceOrientationEvent.requestPermission(); if (r !== 'granted' && ios) return;
+    }
+  }catch{ if (ios) return; }
+  compass.listening = true;
+  if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+}
+setInterval(()=>{ if (compass.ok && Date.now()-compass.at > 4000){ compass.ok=false; if (navOpen) renderNav(); } }, 2000);
+let navOpen=false, navWake=null, navArrived=false;
+(()=>{ const g=document.getElementById('navTicks'); if (!g) return; let h='';
+  for (let a=0;a<360;a+=10){ const big=a%30===0, r1=big?88:93, r=Math.PI*a/180; h+=`<line x1="${(Math.sin(r)*r1).toFixed(1)}" y1="${(-Math.cos(r)*r1).toFixed(1)}" x2="${(Math.sin(r)*100).toFixed(1)}" y2="${(-Math.cos(r)*100).toFixed(1)}" stroke="${big?'#4c5866':'#2f3a47'}" stroke-width="${big?2.5:1.5}"/>`; }
+  g.innerHTML=h; })();
+function openNav(){
+  if (!meet) return;
+  navOpen=true; navArrived=false; $('navView').classList.remove('hidden');
+  startCompass(); ensureGeo();
+  try{ navigator.wakeLock && navigator.wakeLock.request('screen').then(w=>navWake=w).catch(()=>{}); }catch{}
+  renderNav();
+}
+function closeNav(){ navOpen=false; $('navView').classList.add('hidden'); try{ navWake && navWake.release(); }catch{} navWake=null; ensureGeo(); }
+$('navBack').onclick = closeNav;
+$('navMap').onclick = () => { closeNav(); openMap().then(()=>setTimeout(()=>{ if (map && meet){ mapFitted=true; map.invalidateSize(); map.setView([meet.lat,meet.lon],16); } },200)); };
+$('navEdit').onclick = () => { closeNav(); meetModal(); };
+function renderNavDial(){
+  if (!navOpen) return;
+  const h = compass.ok ? compass.h : 0;
+  $('navRose').setAttribute('transform', `rotate(${(-h).toFixed(1)})`);
+  if (meet && myPos) $('navArrow').setAttribute('transform', `rotate(${(bearing(myPos,meet) - h).toFixed(1)})`);
+  $('navArrow').style.opacity = myPos ? 1 : .25;
+}
+function renderNav(){
+  if (!navOpen) return;
+  if (!meet){ closeNav(); return; }
+  $('navTitle').textContent = '🚩 ' + meet.title;
+  const hint=$('navHint'); hint.classList.remove('warn');
+  if (!myPos){ $('navDist').textContent='—'; $('navSub').textContent='Ieškoma tavo vietos…'; }
+  else {
+    const d=distM(myPos,meet), b=bearing(myPos,meet);
+    $('navDist').textContent = d<25 ? 'ČIA' : fmtDist(d);
+    const spd = myPos.spd && myPos.spd > 0.6 ? myPos.spd : null;
+    $('navSub').textContent = `${Math.round(b)}° ${DIRS[Math.round(b/45)%8]} · GPS ±${Math.round(myPos.acc||0)} m` + (spd && d>=25 ? ` · ~${Math.max(1,Math.round(d/spd/60))} min` : '');
+    $('navView').classList.toggle('here', d<25);
+    if (d<25 && !navArrived){ navArrived=true; vib([200,100,200,100,400]); beep(880); beep(1175, ctx?ctx.currentTime+0.15:0); }
+    if (d>=40) navArrived=false;
+  }
+  if (!compass.ok){ hint.classList.add('warn'); hint.textContent = compass.listening ? 'Kompasas nepasiekiamas – rodyklė rodo pagal šiaurę (telefono viršų laikyk į šiaurę).' : 'Paspausk čia, kad įjungtum kompasą'; hint.onclick = startCompass; }
+  else if (compass.acc != null && compass.acc > 30){ hint.classList.add('warn'); hint.textContent = 'Kompasas netikslus – pamosuok telefonu aštuoniuke.'; hint.onclick=null; }
+  else { hint.textContent = 'Laikyk telefoną gulsčiai. Rodyklė rodo tikslą, kur bebūtum atsisukęs.'; hint.onclick=null; }
+  if (myPos && myPos.acc > 50){ hint.classList.add('warn'); hint.textContent = `GPS netikslus (±${Math.round(myPos.acc)} m) – išeik į atvirą vietą.`; }
+  renderNavDial();
+}
 function renderMeetCard(){
   const c=$('meetCard');
   if (!meet || !cur){ c.classList.add('hidden'); return; }
   c.classList.remove('hidden');
+  if (!compass.listening && !/iPhone|iPad|iPod/.test(navigator.userAgent)) startCompass();   // Android – be leidimo
   $('mtTitle').textContent = meet.title;
   if (myPos){
     const d=distM(myPos,meet);
     $('mtInfo').textContent = (d<25 ? 'Tu jau čia' : fmtDist(d) + ' · ' + DIRS[Math.round(bearing(myPos,meet)/45)%8]) + ' · pažymėjo ' + meet.by;
-    $('mtArrow').style.transform = `rotate(${bearing(myPos,meet)}deg)`; $('mtArrow').style.opacity = 1;
+    $('mtArrow').style.transform = `rotate(${bearing(myPos,meet) - (compass.ok ? compass.h : 0)}deg)`; $('mtArrow').style.opacity = 1;
   } else {
     $('mtInfo').textContent = 'Paspausk, kad matytum atstumą · pažymėjo ' + meet.by;
     $('mtArrow').style.opacity = .3;
   }
 }
-$('meetCard').onclick = () => openMap();
+$('meetCard').onclick = () => openNav();
 function renderMeetOnMap(){
   if (!map) return;
   if (!meet){ if (meetLayer){ map.removeLayer(meetLayer); meetLayer=null; } if (meetLine){ map.removeLayer(meetLine); meetLine=null; } return; }
